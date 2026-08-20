@@ -1,0 +1,132 @@
+---
+title: 11. Retrieval Augmentation Generation
+description: Very burning hot topic.
+---
+
+## RAG Pipeline — Step by Step
+
+1. **Document Ingestion**: load raw docs (PDF, HTML, DB records)
+2. **Chunking**: split into smaller pieces
+   - Fixed-size chunking (with overlap, e.g., 512 tokens, 50 overlap)
+   - Semantic chunking (split on meaning/topic shifts)
+   - Recursive chunking (paragraph → sentence fallback)
+   - **Tradeoff**: small chunks = precise retrieval but less context; large chunks = more context but noisier/less precise
+3. **Embedding**: convert chunks → dense vectors (e.g., `text-embedding-3`, `bge-large`, `e5-mistral`)
+4. **Indexing/Storage**: store vectors in a vector DB (Pinecone, Weaviate, Qdrant, FAISS, Milvus, pgvector)
+   - Index types: **HNSW** (Hierarchical Navigable Small World — fast approximate nearest neighbor, most common), **IVF**, flat (exact but slow)
+5. **Query Embedding**: embed the user query with the same embedding model
+6. **Retrieval**: similarity search (cosine similarity / dot product) → top-k chunks
+   - Often combined with **hybrid search**: dense (semantic) + sparse (BM25/keyword) retrieval, merged via score fusion (e.g., RRF - Reciprocal Rank Fusion)
+7. **Reranking**: a cross-encoder reranker (e.g., Cohere rerank, `bge-reranker`) re-scores top-k candidates for relevance — more accurate than embedding similarity alone but slower (used only on a small candidate set)
+8. **Context Construction**: assemble retrieved chunks into a prompt (with citations/metadata)
+9. **Generation**: LLM generates answer conditioned on retrieved context
+10. **(Optional) Post-processing**: citation attribution, hallucination check, guardrails
+
+## Model Selection Process (for RAG components)
+
+**Embedding model selection:**
+- Check **MTEB leaderboard** benchmarks for retrieval task performance
+- Consider: dimension size (higher = better recall but more storage/compute), max token length, domain match (general vs code vs multilingual), latency
+- Common choices: OpenAI `text-embedding-3-small/large`, `bge-large-en`, `e5-mistral-7b`, Cohere embed-v3
+
+**Generator LLM selection:**
+- Context window needed (how much retrieved content + query fits)
+- Latency/cost requirements (larger flagship models vs smaller/faster tiers)
+- Instruction-following quality for grounded/citation-based answers
+- Open-source vs closed API (data privacy, cost at scale, self-hosting complexity)
+
+**Vector DB selection:**
+- Scale (millions vs billions of vectors), filtering needs (metadata filters), managed vs self-hosted, latency SLAs
+
+<img width="1440" height="712" alt="image" src="https://github.com/user-attachments/assets/6d688657-9bd8-4476-bafb-5c84229ec20b" />
+
+
+**Evaluation-driven selection**: always A/B test candidate models against a labeled eval set using retrieval metrics (below) — don't pick based on marketing benchmarks alone.
+
+## RAG Optimizations
+
+### **Semantic Caching**
+- Cache query→response (or query→retrieved-chunks) pairs
+- On a new query, check semantic similarity (via embedding) to cached queries — if similarity > threshold, return cached result instead of re-running full pipeline
+- Reduces latency + cost for repeated/similar queries (e.g., FAQ-style traffic)
+- Risk: stale answers if underlying data changes — needs cache invalidation/TTL strategy
+
+### **Model Routing**
+- Use a small/cheap classifier (or LLM) to route queries to different models based on complexity
+- E.g., simple factual query → small fast model; complex reasoning → larger model
+- Can also route between **RAG vs no-RAG** (e.g., "hi, how are you" doesn't need retrieval)
+- Reduces cost and latency at scale
+
+### **Retrieving Fewer, Higher-Quality Chunks**
+- More chunks ≠ better — increases prompt length (cost, latency) and can introduce **"lost in the middle"** problem (LLMs attend less to middle-of-context info)
+- Optimization strategies:
+  - **Reranking** to surface only the most relevant top-k (e.g., retrieve 50 → rerank → keep top 3-5)
+  - **Contextual compression**: summarize/trim retrieved chunks to only relevant sentences before passing to LLM
+  - **Smaller, well-bounded chunks** with good metadata so retrieval precision is higher, needing fewer chunks
+  - **Query rewriting/decomposition**: rewrite vague queries into more specific sub-queries for more targeted retrieval
+
+### Other RAG optimizations worth knowing
+- **HyDE (Hypothetical Document Embeddings)**: generate a hypothetical answer first, embed that, use it to retrieve (often better than embedding the raw query)
+- **Query expansion**: generate multiple query variants to improve recall
+- **Multi-vector retrieval / parent-child chunking**: retrieve small precise chunks but return the larger parent chunk for context
+- **Metadata filtering**: pre-filter by date/source/category before vector search to narrow search space
+
+## Production Latency Optimization (End-to-End)
+
+*Beyond retrieval-quality tricks above, a working RAG system also has to hit a latency budget. This is the systematic, production-engineering side of RAG optimization — the interview answer that separates "knows RAG concepts" from "has actually run one in production."*
+
+**Where latency actually comes from:** a naive mental model is `total latency ≈ request overhead + retrieval + reranking + prompt/prefill + generation`, but many stages can run in parallel, so profiling — not intuition — must drive optimization. In a real trace, **LLM generation (TTFT + token generation) is almost always the dominant cost**, often 50%+ of total latency, with reranking a distant second and vector search/embedding a small fraction. This is why shaving milliseconds off vector search is rarely the highest-leverage fix.
+
+**Define a latency budget (SLO) before optimizing anything** — e.g. p50 < 1.5s, p95 < 3s, p99 < 5s — and break it into a per-stage budget (embedding, retrieval, reranking, prompt build, TTFT, generation). Always track **p50/p95/p99**, not just the average: an average can look fine while a meaningful tail of users has a terrible experience (95 users at 1s + 5 users at 10s still "looks okay" on average).
+
+**TTFT vs total latency are different problems.** Time-To-First-Token (TTFT) is driven by prompt length/prefill; total generation time is driven by output length/decode speed — measure them separately. **Streaming** (returning tokens as they're generated instead of waiting for the full response) is the single biggest *perceived*-latency win, but it does not reduce actual compute time — it only improves time-to-useful-output. This distinction is frequently the crux of a "how would you make RAG feel faster" interview question.
+
+**Caching, at multiple layers (cheapest wins, apply in this order):**
+
+| Layer | What's cached | Risk |
+|---|---|---|
+| Query embedding cache | Hash(query) → embedding vector, skips re-embedding repeated queries | Low risk, easy win |
+| Semantic query cache | Similar (not identical) queries reuse cached embedding/results via a similarity threshold | Threshold too loose → wrong reuse; must be tuned empirically |
+| Retrieved-results cache | Query → top-k doc IDs, skips the vector DB round-trip | Staleness if the knowledge base changes — key must include KB/embedding-model version |
+| Full LLM answer cache | Question → final answer, skips the whole pipeline | Dangerous for dynamic/time-sensitive info; needs explicit invalidation when source docs change |
+| Prompt/prefix (KV) caching | Reused system-prompt/instruction prefixes reuse cached KV state at the inference layer | Infra-level; effective for repeated system prompts, less so for highly variable prefixes |
+
+**Retrieval-side latency levers:**
+- **ANN over exact search**: HNSW/IVF/PQ trade a small amount of recall for large speedups over brute-force nearest neighbor at scale (millions of vectors) — tune ANN parameters against a recall/latency benchmark, don't just pick the fastest setting.
+- **Metadata filtering before vector search**: narrowing 10M vectors down to a tenant/department-scoped subset before the ANN search improves both relevance and latency.
+- **Hybrid retrieval (dense + BM25) run in parallel, not sequentially**: `max(dense, bm25)` instead of `dense + bm25` — a straightforward async/concurrency win that's easy to miss if retrieval calls are written sequentially.
+- **Query rewriting/multi-query fusion adds real latency** (an extra LLM call before retrieval even starts) — only justified if it measurably improves *end-to-end* answer quality, not just an offline retrieval metric.
+
+**Reranking discipline:** rerankers (cross-encoders) are accurate but slow — the common mistake is reranking too many candidates (e.g., reranking all 1000 retrieved instead of the top 50). Use a **confidence-gated reranker**: skip reranking when first-stage retrieval scores are already high-confidence, only invoke the reranker on ambiguous cases. Right-size retrieve→rerank→keep counts (e.g., 50→20→5) via evaluation, not by default.
+
+**Context and prompt size control:** the goal isn't "give the LLM as much context as possible," it's "give it the smallest amount of high-quality context needed" — more chunks means longer prefill (higher TTFT, higher cost) and a worse lost-in-the-middle risk. This extends to **conversation history**: sending the full multi-turn history on every request grows unboundedly; summarize/compress older turns and keep only recent turns + relevant memory.
+
+**Model-side levers:** **model routing** (small/fast model for simple queries, large model reserved for complex ones) is usually the biggest cost/latency lever after eliminating unnecessary pipeline stages. **Quantization** and **speculative decoding** matter for self-hosted serving but are advanced/late-stage optimizations — apply after the simpler wins (model choice, prompt size, caching, serving config) are exhausted.
+
+**Infra and reliability:** colocate latency-sensitive services in the same region, use connection pooling/persistent connections/async I/O to avoid sequential network round-trips, and pre-warm models/connections to avoid cold-start latency spikes. Use bounded retries with timeouts and circuit breakers — an unbounded retry against an unhealthy dependency can silently consume the entire latency budget. Design graceful degradation (reranker times out → fall back to raw retrieval order; primary model unavailable → fall back to a smaller model) rather than letting one dependency fail the whole request.
+
+**The optimization hierarchy (apply in this order, cheapest/highest-leverage first):**
+1. **Eliminate work** — cache hits, skip RAG entirely for simple/greeting queries, skip reranking when unnecessary
+2. **Parallelize work** — run dense + BM25 + metadata lookups concurrently instead of sequentially
+3. **Reduce work** — smaller context, smaller top-k, shorter prompts, trimmed history
+4. **Make the remaining work faster** — ANN, GPU serving, quantization, continuous batching
+5. **Improve perceived latency** — streaming, progressive UI feedback
+
+**Observability is what makes any of this possible.** Instrument every stage of the pipeline individually (embedding, dense search, BM25, fusion, reranking, document fetch, prompt build, TTFT, generation) so that "RAG is slow" becomes "reranking is 40% of p95 latency" instead of a guessing exercise. Without per-stage tracing, engineers tend to optimize the wrong thing (e.g., the vector DB) while the LLM generation call — which usually dominates — goes unexamined.
+
+**Interview soundbite:** *"I wouldn't start by asking which vector database is fastest — I'd instrument the full pipeline, establish a p95/p99 latency budget, and find the actual bottleneck first. In most RAG systems that's LLM generation, not retrieval, so the highest-leverage fixes are usually eliminating unnecessary pipeline stages, caching, and streaming — not micro-optimizing vector search."*
+
+**Common mistakes to flag proactively:** optimizing before profiling (assuming vector search is the bottleneck without measuring); increasing top-k to chase recall without accounting for the added reranking/prompt cost; sending the entire conversation history and full retrieved context to the LLM by default; assuming streaming reduces total compute time (it only improves perceived latency); and optimizing only p50 while p99 users silently have a much worse experience.
+
+## Fallback Behaviors (Production Reality)
+When retrieval fails or returns low-confidence results:
+
+| Scenario | Fallback Strategy |
+|---|---|
+| **No relevant chunks retrieved** | Return honest "I don't know" instead of hallucinating; optionally escalate to human |
+| **Low confidence score** | Use confidence threshold; if below, route to a more powerful model or human |
+| **Outdated retrieved content** | Combine with real-time search (Google, internal APIs) for fresh info |
+| **Contradictory sources** | Surface the conflict to user, cite all sources, let them decide; don't hallucinate consensus |
+| **Ambiguous query** | Ask clarifying question instead of guessing; improves UX vs. wrong answer |
+
+**Interview angle:** "A good production system knows when it doesn't know — fallback handling is as important as the happy path."

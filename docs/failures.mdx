@@ -1,0 +1,67 @@
+---
+title: 15. Failure Diagnosis Book
+description: What if something fails?
+---
+
+*The single most common category of open-ended AI/ML interview question is "X is broken/slow/wrong — walk me through how you'd find out why." This section is a repeatable framework, not a list of unrelated fixes: for every failure type below, triage into the right bucket first, then isolate, then fix. Interviewers are grading the triage step as much as the final answer.*
+
+## The General Pattern
+1. Split the symptom into mutually exclusive buckets before touching code — most wrong answers/slow requests/cost spikes have 3-5 plausible root causes that produce identical-looking symptoms.
+2. Pick the cheapest diagnostic that discriminates between buckets (log a raw score, check a timestamp, count tokens) before reaching for a heavier fix.
+3. Fix the actual bucket, don't shotgun-fix all of them — that's how you burn interview time, and in production, burn on-call time.
+
+## 1. RAG Gives Wrong Answers
+
+**First fork — is the answer grounded in what was retrieved, or not?**
+
+| Bucket | How you tell | Likely cause | Fix |
+|---|---|---|---|
+| **Faithfulness failure** | Answer isn't supported by the retrieved chunks at all | Model ignoring context, falling back on parametric memory, or over-extrapolating | Strip the prompt down to bare context + question and retest; check if the hallucinated fact matches the base model's general knowledge (parametric leakage); lower temperature; add an explicit "only use the provided context" instruction |
+| **Retrieval failure** | Answer faithfully reflects the retrieved chunks, but those chunks are wrong/irrelevant | Embedding model mismatch, bad chunking, similarity metric mismatch, metadata filter excluding relevant docs | Pull raw top-k + similarity scores and eyeball them; high score + wrong topic → embedding/domain issue; low scores across the board → genuine coverage gap in the index |
+| **Source data failure** | Retrieved chunks are correct and relevant, answer faithfully reflects them, but they're simply wrong | Stale docs, conflicting versions, upstream data entry error | Audit the corpus, not the code — check doc freshness/versioning, look for contradictory sources on the same topic |
+| **Silent pipeline bug** | Every stage looks fine in isolation, answer still wrong end-to-end | Index-time vs query-time embedding version drift, chunk-ID→text mapping scrambled on reindex, prompt template silently truncating context under a token budget | Check the boring stuff first: embedding model version pinned identically on both sides, chunk IDs resolve to the text you expect, log the *final assembled prompt* actually sent to the LLM — not what you think you sent |
+
+**Interview soundbite:** *"A wrong RAG answer isn't one bug category — the first move is figuring out whether the failure is in retrieval, generation faithfulness, the source data, or a silent pipeline mismatch, because those four need completely different fixes."*
+
+## 2. Latency Problems
+
+| Symptom | Likely bucket | Isolate | Fix |
+|---|---|---|---|
+| High **TTFT** | Prefill-bound (long prompt) or queueing-bound (GPU saturation) | Check prompt token count vs typical; check queue depth/concurrent requests at the provider | Shrink context, prefix-cache the system prompt, reduce retrieved chunk count; or add capacity / provisioned throughput |
+| Good TTFT, slow **tokens/sec** | Decode-bound | Check output length, KV cache size vs GPU memory bandwidth, batch size | Speculative decoding, smaller/faster model for this path, right-size batch |
+| **P50 fine, P99 terrible** | Tail latency — one slow dependency blocking, GC pause, a hot/overloaded shard | Trace individual slow requests, not aggregates; check for retries without timeouts | Timeouts + circuit breakers on downstream calls, shard rebalancing, isolate noisy neighbors |
+| **Latency degraded gradually over weeks**, no code change | Index growth past ANN sweet spot, traffic pattern shift, silent chunk-count creep | Compare index size/query volume now vs when it was fast; check if a routing/chunk-count parameter drifted | Reindex/reshard the vector DB, re-tune HNSW parameters, audit config drift |
+
+**Interview soundbite:** *"In a RAG or agent pipeline, generation latency almost always dominates — so the highest-leverage fixes are semantic caching and streaming, not shaving milliseconds off vector search."* (See Section 12's "Production Latency Optimization" for the full end-to-end breakdown and optimization order.)
+
+## 3. Cost Blowups
+
+- **"Bill 3x'd, no code changed"** → check traffic growth first (boring, often the real answer), then a silent prompt-length regression (debug logging leaking into the prompt, a chunk-count bug retrieving 50 instead of 5), then a retry storm burning tokens on repeated failures.
+- **"Cut inference cost 50% without hurting quality"** → model routing (cheap model for easy queries), prompt/prefix caching, trimming redundant context, distillation/fine-tune to a smaller model for the common case, batching where real-time isn't required.
+
+## 4. Fine-Tuning Failures (beyond "loss fine, output garbage" in the coding/debugging section)
+
+| Symptom | Likely cause | Fix |
+|---|---|---|
+| Model got *worse* at things it used to do well | Catastrophic forgetting — LR too high, fine-tune set too narrow | Lower LR, mix in general-purpose data (replay), use LoRA to limit drift |
+| Training loss ↓ but eval score flat/worse | Overfitting to train distribution, eval/train leakage, loss doesn't correlate with the metric you actually care about | Check eval set independence, correlate loss vs target metric on a held-out slice before trusting either |
+| Multi-GPU slower than single-GPU | Communication overhead dominating — wrong parallelism strategy for the hardware | Keep tensor parallelism within fast-interconnect nodes; check actual GPU utilization vs time spent in all-reduce |
+
+## 5. Agent Failures (diagnosis, not just the failure-mode list in the Agents section)
+
+- **Stuck in a tool-call loop**: instrument by logging (tool, args) tuples per step and flagging repeats — "add a max iteration limit" is the fix, but the interview wants to hear *how you'd detect it happening in production*, not just cap it blindly.
+- **Agent claims an action succeeded but didn't**: don't trust the model's self-report — verify via the actual tool/API response (a write returned 200, a file exists, a record's `updated_at` changed) before letting the agent proceed.
+
+## 6. Forecasting-Specific Failures (siblings to the backtest-vs-production drill in the coding section)
+
+- **Consistently biased in one direction** (not just "inaccurate") → check for a systematic issue: promo effects not fully captured, or a log-transform back-transformation bug (a very common silent one — forgetting to exponentiate back after modeling in log space skews every prediction the same direction).
+- **New-SKU forecasts are terrible** → check whether cold-start fallback logic (analogous product, hierarchical pooling) is actually firing, or whether the model is silently defaulting to zero/global average for unseen IDs.
+
+## 7. "Eval Looks Great, Users Are Unhappy"
+
+- Golden set doesn't represent real production traffic distribution (built from easy/clean examples, users ask messier things)
+- LLM-as-judge bias inflating scores (verbosity bias, position bias) — validate against a human-labeled sample
+- Eval measuring the wrong thing entirely (fluency/coherence instead of correctness/faithfulness)
+- **A/B test shows no significant difference** — before concluding "no effect," check if the test was even powered to detect one at that sample size; a null result and an underpowered test look identical from the outside
+
+**Interview soundbite:** *"A failure-diagnosis question is really testing whether you triage before you debug — wrong answers, slow requests, and cost spikes all have several plausible root causes that look identical from the outside, and picking the wrong bucket first wastes the whole investigation."*

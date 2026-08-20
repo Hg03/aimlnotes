@@ -1,0 +1,70 @@
+---
+title: 5. LLM Architecture & Inference Parameters
+description: How it works and generates.
+---
+
+## Context Window (Critical Constraint)
+- **What it is**: max number of tokens the model can process at once (e.g., 8K, 32K, 128K, 200K)
+- **Why it matters**: anything outside is completely ignored — no "overflow" behavior
+- **Production implication**: RAG/prompt engineering must fit everything (instructions + context + query) within this budget
+- **Current landscape**: 
+  - GPT-3.5: 4K/16K
+  - GPT-4: 8K/128K
+  - Claude 3: 100K-200K (depends on variant)
+  - Llama 3: 8K native (can be extended via RoPE scaling)
+
+## KV Cache (Inference Efficiency)
+- **Problem**: during autoregressive generation, each new token needs attention over all previous tokens
+- **Naive approach**: recompute K, V for entire sequence at every new token → wasteful
+- **KV Cache solution**: store computed Key & Value tensors from previous tokens, reuse them, only compute K/V for the new token
+- **Tradeoff**: **Memory for speed** — KV cache grows linearly with (sequence_length × batch_size × num_layers × num_heads × head_dim)
+- **Real impact**: KV cache is often the **memory bottleneck** in serving LLMs, not model weights
+- **Cost at scale**: for 70B model serving 1000-token context at batch 32, KV cache ≈ 40GB (vs model weights ≈ 140GB)
+
+## PagedAttention (vLLM's innovation)
+- **Problem**: naive KV cache allocation reserves **contiguous memory** for max sequence length per request → massive fragmentation when sequences vary in length
+- **Solution** (inspired by OS virtual memory): 
+  - Split KV cache into fixed-size **blocks** ("pages", e.g., 16 tokens each)
+  - Store non-contiguously, map via a block table (like page table in OS)
+- **Benefits**:
+  - Near-zero memory waste (allocate only what's needed)
+  - **Memory sharing** across sequences (e.g., shared prompt prefixes in parallel decoding, beam search reuse blocks)
+  - Enables higher batch sizes → higher throughput
+- **This is the core win behind vLLM's 10-20x serving speedup**
+
+<img width="1100" height="605" alt="image" src="https://gist.github.com/user-attachments/assets/e165c46d-c595-4e30-b2f1-5f7025dc4c91" />
+
+
+## GQA (Grouped Query Attention) & Multi-Query Attention (MQA)
+- **Problem**: Multi-head attention has (num_heads × head_dim) K/V tensors per layer — KV cache is huge
+- **MQA (Multi-Query Attention)**: all query heads share **one** K/V pair — drastically reduces KV cache size (e.g., from 32 heads worth to 1)
+  - Tradeoff: sometimes slight accuracy drop vs full MHA
+  - Used in: fast models (Falcon, T5-large)
+- **GQA (Grouped Query Attention)**: middle ground — query heads grouped, each group shares one K/V pair (e.g., 8 query head groups share 8 K/V pairs, vs 32 full pairs)
+  - Better accuracy than MQA while still reducing cache size
+  - Increasingly common in new models (Llama 3.1, Mistral)
+- **Interview angle**: GQA is an easy win for inference efficiency, worth mentioning if asked about serving optimizations
+
+<img width="800" height="443" alt="image" src="https://github.com/user-attachments/assets/73de4166-049c-4915-98a7-0eac56fa8585" />
+
+
+## Other Serving Optimizations
+- **Continuous batching**: dynamically add/remove requests from batch mid-generation instead of static batching (reduces GPU idle, enables higher throughput)
+- **Speculative decoding**: small "draft" model proposes multiple tokens, large model verifies in parallel → speeds up generation
+- **FlashAttention**: fuses attention computation to reduce memory I/O (reads/writes to HBM), not an approximation — exact attention, just faster via tiling
+- **Flash-Decoding**: variant of FlashAttention optimized for single-token decode phase (different compute/memory tradeoff than prefill)
+
+
+## Temperature & Sampling (Inference Parameters)
+During inference, LLMs don't just pick the highest-probability next token; they use **sampling** to introduce variability.
+
+| Parameter | Effect | Typical Range |
+|---|---|---|
+| **Temperature** | Controls randomness. `logits / temp` before softmax. Low=deterministic, high=creative | 0.1-2.0; default 1.0 |
+| **Top-K** | Sample from top K most likely tokens (ignores tail of distribution) | 20-100 |
+| **Top-P (Nucleus)** | Sample from smallest set of tokens with cumulative probability > P | 0.8-0.95 |
+| **Min-P** | Only sample tokens with prob ≥ min_p × max_prob; more adaptive than fixed Top-K | 0.05-0.2 |
+
+**Interview framing:** "Temperature rescales logits before softmax — low temp sharpens distribution (deterministic), high temp flattens it (more random). Top-P/Top-K directly prune the tail of the distribution to avoid sampling absurdities."
+
+**Common gotcha:** Temperature 0 = argmax (always pick highest prob), NOT "no randomness" — some implementations special-case this.

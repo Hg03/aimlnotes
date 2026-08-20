@@ -1,0 +1,45 @@
+---
+title: 10. Embeddings
+description: Main core behind every retrieval system.
+---
+
+*RAG and semantic search both live and die by embedding quality — worth understanding beyond "it turns text into vectors."*
+
+## What an Embedding Actually Is
+- A dense vector representation of text (or image/audio) such that **semantic similarity ≈ geometric proximity** in vector space
+- Learned via contrastive objectives: pull semantically similar pairs closer, push dissimilar pairs apart
+
+## Similarity Metrics — know when each applies
+| Metric | Formula intuition | When to use |
+|---|---|---|
+| **Cosine Similarity** | Angle between vectors, ignores magnitude | Most common for text embeddings — magnitude often just reflects text length, not meaning |
+| **Dot Product** | Cosine × magnitude of both vectors | Faster to compute (no normalization step); equivalent to cosine if vectors are pre-normalized to unit length |
+| **Euclidean (L2) Distance** | Straight-line distance | Sensitive to magnitude; common in non-text embedding spaces (e.g., some image embeddings) |
+
+**Interview trap:** if embeddings are already normalized to unit length, cosine similarity and dot product give the **same ranking** — many vector DBs default to dot product for this reason (cheaper, no division).
+
+## How Embedding Models Are Trained (contrastive learning basics)
+- **Contrastive loss** (e.g., InfoNCE): given an anchor and a positive (similar) example, push their embeddings together while pushing apart embeddings of negatives (other unrelated examples in the batch)
+- **In-batch negatives**: cheap trick — treat every other example in the training batch as a "negative" for the current anchor, no need for explicitly labeled negatives
+- **Hard negative mining**: deliberately include negatives that are *superficially* similar but semantically different (harder to distinguish) — significantly improves retrieval quality over random negatives
+- Sentence-embedding-specific approaches: **Siamese/bi-encoder** architecture (two texts encoded independently, compared via similarity) vs **cross-encoder** (both texts fed jointly into one model — much more accurate but can't be pre-computed/indexed, hence used only for reranking a small candidate set, not full-corpus search)
+
+## Bi-encoder vs Cross-encoder (a very common question)
+| | Bi-encoder | Cross-encoder |
+|---|---|---|
+| Architecture | Encodes query & doc **separately** | Encodes query+doc **together** (joint attention) |
+| Speed | Fast — docs pre-embedded & indexed once | Slow — must run inference per query-doc pair |
+| Accuracy | Lower (no cross-attention between query/doc) | Higher (full interaction between query & doc) |
+| Use case | Initial retrieval over millions of docs | Reranking a small top-k candidate set |
+
+<img width="800" height="523" alt="image" src="https://gist.github.com/user-attachments/assets/350ef87e-7ccd-4156-8a8c-6e4fd064b98d" />
+
+
+## Fine-tuning Your Own Embedding Model (when off-the-shelf isn't enough)
+- Useful when domain vocabulary is highly specialized (legal, medical, internal jargon) and general embeddings cluster things incorrectly
+- Typically done via contrastive fine-tuning on domain-specific (query, relevant-doc) pairs, often starting from a strong open-source base (e.g., `bge`, `e5`) rather than training from scratch
+- Evaluate with retrieval metrics (Recall@k, MRR) on a held-out labeled set before/after fine-tuning to confirm actual improvement
+
+## Dimensionality Tradeoffs
+- Higher dimension → captures more nuance, generally better recall, but more storage + slower search
+- **Matryoshka embeddings** (newer technique, e.g. OpenAI's `text-embedding-3`): trained so that truncating the vector (e.g., using only the first 256 of 1536 dims) still gives a usable, well-ordered embedding — lets you trade off storage/speed vs accuracy *after* embedding, without re-embedding everything

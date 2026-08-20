@@ -1,0 +1,69 @@
+---
+title: 3. Deep Learning & Transformers
+description: Something learning deep.
+---
+
+## Backpropagation (intuition, not derivation)
+- Forward pass computes prediction → loss
+- Backward pass uses **chain rule** to compute gradient of loss w.r.t. every weight, layer by layer, from output back to input
+- Each weight update: `w = w - α * ∂L/∂w`
+- Interview framing: "backprop is just efficient chain-rule bookkeeping via a computation graph"
+
+<img width="1024" height="559" alt="image" src="https://gist.github.com/user-attachments/assets/ce6c5e16-72be-4be1-897d-bde1a2f35010" />
+
+
+## Vanishing / Exploding Gradients
+- **Vanishing**: gradients shrink exponentially through many layers (common with sigmoid/tanh, deep RNNs) → early layers stop learning
+- **Exploding**: gradients grow unbounded → unstable updates, NaNs
+- Fixes: ReLU family activations, residual/skip connections, gradient clipping, careful initialization (Xavier/He), normalization layers
+
+<img width="1024" height="559" alt="image" src="https://gist.github.com/user-attachments/assets/ab00fa3a-d11e-4dc8-b1d3-28d8d51a4c1b" />
+
+
+## Normalization
+- **BatchNorm**: normalizes across the batch dimension per feature — great for CNNs, but breaks down with small batches / variable-length sequences
+- **LayerNorm**: normalizes across the feature dimension per sample — used in transformers, batch-size independent
+- **RMSNorm**: simplified LayerNorm (no mean-centering, only rescales by root-mean-square) — cheaper, used in LLaMA-family models
+
+## Why Transformers Replaced RNNs/LSTMs
+- **RNNs/LSTMs**: process sequentially (token-by-token) → can't parallelize across time steps → slow to train, and still struggle with very long-range dependencies (vanishing gradient over long sequences even with gating)
+- **Transformers**: self-attention lets every token directly attend to every other token in **one step** → fully parallelizable across the sequence during training, and captures long-range dependencies directly (no signal decay over distance)
+- Tradeoff transformers introduce: O(n²) attention cost vs RNN's O(n) — this is precisely the problem KV cache/PagedAttention/FlashAttention address at inference time
+
+## CNN vs RNN vs Transformer (one-liner each)
+- **CNN**: local receptive fields, great for spatial/grid data (images), weight sharing via convolution kernels
+- **RNN/LSTM**: sequential, maintains hidden state, natural fit for sequences but slow + long-range issues
+- **Transformer**: parallel, attention-based, dominant for language (and increasingly vision — ViT) due to scalability
+
+## Transformer Architecture (Deep Dive)
+*Introduced in "Attention Is All You Need" (2017) — the absolute cornerstone of modern NLP.*
+
+**Core components:**
+- **Self-Attention**: `Attention(Q,K,V) = softmax(QK^T / √d_k) V`
+  - Q (Query), K (Key), V (Value) are linear projections of input
+  - Allows model to dynamically look at other tokens to understand context (e.g., "it" → resolves to "animal" not "street")
+  - Why divide by √d_k? Keeps dot-product magnitude stable, prevents softmax from saturating into near one-hot (vanishing gradients)
+
+- **Multi-Head Attention**: multiple attention computations in parallel, concatenated → captures different relationship types (semantic, syntactic, long-range, etc.)
+
+- **Positional Encoding**: injects order info (critical since Transformers process in parallel)
+  - **Original (sinusoidal)**: uses sin/cos functions at different frequencies
+  - **RoPE (Rotary Position Embedding)**: encodes relative position via rotation matrices, better extrapolation, used in LLaMA/GPT-NeoX
+  - **ALiBi (Attention with Linear Biases)**: adds position-dependent bias to attention scores, simpler than RoPE, used in some newer models.
+
+- **Feed Forward Network (FFN)**: per-token MLP after attention; typically two linear layers with ReLU/GELU
+
+- **LayerNorm/RMSNorm** + **residual connections**: stabilize training, enable deeper architectures
+
+**Variants:**
+- **Decoder-only** (GPT-style): causal mask, autoregressive generation — dominant for LLMs (can't attend to future tokens)
+- **Encoder-only** (BERT-style): bidirectional attention, good for classification/embeddings
+- **Encoder-Decoder** (T5-style): good for seq2seq (translation, summarization)
+
+## Why Attention is Expensive
+- Complexity: **O(n²)** in sequence length (each token attends to every other token)
+- Memory: **O(n²)** for attention weights matrix
+- This is why long-context is hard and optimizations (KV cache, FlashAttention, sparse attention) matter critically
+
+<img width="1024" height="559" alt="image" src="https://gist.github.com/user-attachments/assets/9c903de3-7874-4cab-a329-3d541bbd4c6e" />
+

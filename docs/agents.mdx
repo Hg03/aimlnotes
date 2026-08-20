@@ -1,0 +1,37 @@
+---
+title: 8. Agents
+description: Most trending buzz word.
+---
+
+## What Makes an "Agent"
+An LLM wrapped in a loop that can: **reason → decide on an action (tool call) → observe result → repeat** until it reaches a final answer or goal — as opposed to a single-shot prompt→response.
+
+## ReAct Pattern (core agent loop)
+```
+Thought: I need to find the current weather to answer this
+Action: call_weather_api(city="London")
+Observation: 15°C, cloudy
+Thought: I now have enough info
+Final Answer: It's 15°C and cloudy in London
+```
+
+## Planning vs Execution Separation
+- **Planner**: breaks a complex goal into a sequence of sub-tasks (can be a separate LLM call or the same model in a "plan" step)
+- **Executor**: carries out each sub-task, possibly calling tools
+- Separating these improves reliability on complex multi-step tasks vs asking one model to plan-and-act simultaneously
+
+## Multi-Agent Orchestration
+- **Supervisor/worker pattern**: one orchestrator LLM delegates sub-tasks to specialized worker agents (e.g., a "researcher" agent, a "coder" agent), then synthesizes results
+- **Debate/critique pattern**: one agent generates, another critiques/verifies — improves output quality (self-refine loops)
+- Frameworks to know by name: LangGraph, AutoGen, CrewAI (implementation detail, not usually deep-dived, but good to mention)
+
+## Common Agent Failure Modes (interviewers love asking about these)
+- **Infinite loops**: agent keeps calling the same tool without making progress → mitigate with max iteration limits, loop detection
+- **Tool misuse**: wrong tool chosen, or valid tool called with malformed/hallucinated arguments → mitigate with strict schemas + validation
+- **Compounding errors**: small mistake early in a multi-step chain propagates and amplifies → mitigate with intermediate verification/checkpoints
+- **Context window bloat**: long tool-call histories eat up context → mitigate with summarizing/pruning intermediate steps
+- **Lack of grounding**: agent "hallucinates" that an action succeeded — always verify via actual observation, not assumption
+
+## Agents vs Simple RAG (a common distinguishing question)
+- RAG: single retrieval → single generation (no decision-making loop)
+- Agent: can decide **whether/when/how many times** to retrieve, use other tools, and iterate — more flexible but less predictable and more expensive/slower

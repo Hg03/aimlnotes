@@ -1,0 +1,83 @@
+---
+title: 6. LLM Training
+description: SFT, RLHF, DPO, GRPO.
+---
+
+*This is "how does a base model become ChatGPT" — commonly asked to distinguish candidates who've only ever called an API from those who understand what's under the hood.*
+
+### Stage 1: Pretraining
+- Train on massive unlabeled text corpora with a simple objective: **next-token prediction** (causal language modeling)
+- This is where the model learns grammar, facts, reasoning patterns, and world knowledge — purely from predicting the next token at scale
+- Result: a **base model** — fluent but not necessarily helpful, obedient, or safe. It completes text; it doesn't "follow instructions" reliably (e.g., asked a question, it might continue the question rather than answer it)
+- Extremely expensive (thousands of GPUs, weeks/months) — this is the stage almost nobody outside a few labs actually does
+- **Data quality matters enormously** — filtering out low-quality text, removing PII, deduplication all improve downstream performance
+
+### Stage 2: Supervised Fine-Tuning (SFT)
+- Fine-tune the base model on a curated dataset of **(prompt, ideal response)** pairs, written/curated by humans
+- Teaches the model the "assistant" format/behavior: follow instructions, answer directly, adopt a helpful tone
+- Still just standard supervised learning (cross-entropy loss on the target response tokens) — nothing exotic yet
+- This is the stage most "instruction-tuned" or "chat" open-source models stop at (e.g., early Alpaca-style models)
+- **Data scale**: typically 5K-100K high-quality examples (vs billions for pretraining)
+
+### Stage 3: Alignment — RLHF (Reinforcement Learning from Human Feedback)
+1. **Collect preference data**: humans rank multiple model outputs for the same prompt (A better than B, or A>B>C ranking)
+2. **Train a Reward Model (RM)**: a separate model learns to predict human preference scores from this ranked data (typically via Bradley-Terry or similar ranking loss)
+3. **RL fine-tuning (typically PPO — Proximal Policy Optimization)**: 
+   - The SFT model is the "policy" to optimize
+   - The RM outputs a scalar reward for each generation
+   - Use PPO to maximize reward while staying close to the SFT model (KL-divergence penalty prevents drift / "reward hacking")
+- **Goal**: align the model with human preferences (helpfulness, harmlessness, honesty) beyond what SFT alone captures
+- **Downside**: RLHF/PPO is complex, unstable to train, and requires maintaining 4 models in memory simultaneously (policy, reference/SFT copy, reward model, value model) — expensive and finicky
+
+### DPO (Direct Preference Optimization) — the modern simplification
+- **Key insight**: you can mathematically derive a loss function that **directly optimizes on preference pairs (chosen vs rejected response)** without needing to train a separate reward model or run RL at all
+- **How it works**: DPO loss directly increases the likelihood of the "chosen" response relative to the "rejected" one, using the SFT model as an implicit reference
+- **Benefits**: 
+  - Much simpler to implement, more stable
+  - No separate RM training
+  - No RL loop (no PPO complexity)
+  - Cheaper — single forward/backward pass per pair
+  - This is why DPO (and variants like KTO, ORPO, IPO) have largely replaced full RLHF/PPO pipelines in practice
+- **Interview soundbite:** *"DPO reformulates RLHF's reward-modeling + RL problem as a single classification-style loss on preference pairs — same end goal (align to human preference), far simpler optimization."*
+
+### GRPO (Group Relative Policy Optimization) — emerging alternative
+
+- **Key insight** (vs DPO): instead of optimizing on preference pairs (chosen vs rejected), GRPO groups outputs and optimizes **relative rankings within groups**
+- **How it works**: 
+  - Generate multiple responses for the same prompt (e.g., 4 variants)
+  - Rank them (or get human rankings)
+  - Optimize so higher-ranked responses get higher likelihood, lower-ranked get penalized
+  - No separate reference model or implicit reward — uses group-relative ranking directly
+- **Advantages over DPO**:
+  - More sample-efficient (one ranking covers multiple comparisons)
+  - Handles ties/indifference naturally (same rank = no penalty)
+  - Better scaling with batch of generations
+  - More flexible ranking (can use soft rankings, not just binary preference)
+- **Used by**: DeepSeek and other labs optimizing for reasoning models
+- **When it wins**: when you have multiple outputs per prompt (e.g., diversity sampling, generation variants) and want to rank them holistically
+- **Tradeoff vs DPO**: slightly more complex to implement, requires multiple outputs per prompt (vs simple pairs), but potentially better convergence
+
+**Quick comparison of DPO variants:**
+
+| Variant | Input | Optimization | Sample Efficiency | Complexity |
+|---|---|---|---|---|
+| **DPO** | Preference pairs (better vs worse) | Binary ranking loss | Baseline | Simple |
+| **GRPO** | Multiple outputs + ranking | Group-relative ranking loss | Higher (multiple comparisons per prompt) | Moderate |
+| **IPO** | Preference pairs | Implicit ranking with different loss | Similar to DPO | Simple |
+| **ORPO** | Prompt + preferred + dispreferred | Odds ratio + reference | Baseline + adds regularization | Moderate |
+| **KTO** | Binary feedback (good/bad, not pairs) | Class-relative optimization | Can use binary labels | Simple |
+
+
+
+**Interview framing:** "GRPO handles group rankings better than pairwise comparison — useful when you're sampling multiple outputs and want holistic ranking. DPO is simpler if you already have preference pairs."
+
+### Quick Comparison
+| Stage | Objective | Data Needed | Output | Cost |
+|---|---|---|---|---|
+| Pretraining | Next-token prediction | Massive unlabeled text (TB scale) | Base model | Massive (1000s GPUs, weeks+) |
+| SFT | Supervised loss on ideal responses | (prompt, response) pairs (10K-100K) | Instruction-following model | Moderate |
+| RLHF (PPO) | Maximize learned reward w/ KL penalty | Human preference rankings + RM train | Aligned/"chat" model | High (4 models in memory) |
+| DPO | Direct loss on preference pairs | Human preference rankings (chosen vs rejected) | Aligned/"chat" model | Low-moderate |
+| GRPO | Direct loss on group rankings | Multiple outputs + human rankings per prompt | Aligned/"chat" model | Low-moderate |
+
+<img width="800" height="611" alt="Untitled design" src="https://gist.github.com/user-attachments/assets/2f99dc3e-3749-4df0-b52b-93aa909416c4" />

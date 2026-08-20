@@ -1,0 +1,29 @@
+---
+title: 12. Multimodal
+description: LLM model that will take many responsibilies like text, image together.
+---
+
+*Increasingly asked, and easier than deep vision knowledge.*
+
+## Vision Transformers (ViT)
+- **Idea**: treat image as a sequence of patches (e.g., 16×16 pixel patches), linearize → apply standard Transformer
+- **Process**: image → patches → linear projection → position embeddings → standard transformer encoder
+- **Advantage**: same architecture as language transformers, parallelizable, scales with image resolution
+- **Tradeoff**: patch-based means fine details at very small scales can be lost; more patches = longer sequence = more compute
+
+## CLIP (Contrastive Language-Image Pre-training)
+- **Architecture**: dual-encoder — separate text encoder + image encoder, trained to align embeddings
+- **Loss**: contrastive — pull (image, description) pairs together, push apart unrelated pairs
+- **Why it matters**: learned a vision-language embedding space that's robust to paraphrasing, object variations, etc.
+- **Use case**: zero-shot image classification, image-text retrieval, grounding text queries to images
+- **Tradeoff**: dual-encoder is efficient for retrieval but weaker than models with cross-attention between modalities
+
+## LLaVA-style Vision-Language Models
+- **Architecture**: vision encoder (ViT or similar) → adapter/projection → language model
+- **Process**: image → visual tokens → concatenate with text tokens → LLM processes unified sequence
+- **Capabilities**: image understanding, OCR, visual reasoning, object counting, diagram interpretation
+- **Limitation**: can hallucinate visual details or misinterpret complex scenes
+
+## Multimodal Eval
+- COCO Captions (caption quality), VQA (visual question answering accuracy), hallucination rate (false visual claims)
+- Much harder to eval than text-only — often requires manual review or LLM-as-judge

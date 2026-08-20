@@ -1,0 +1,35 @@
+---
+title: 16. Testing and Evals
+description: How to test your system?
+---
+
+*The natural bridge between "Evaluation" (Section 16) and real engineering practice — how do you actually prevent regressions in a non-deterministic system?*
+
+## The Core Problem
+Traditional unit tests assert exact outputs. LLM outputs are non-deterministic and open-ended — you can't `assertEqual(response, "expected string")`. Testing strategy has to shift from exact-match to **quality-threshold** and **regression-detection** based approaches.
+
+## Golden Datasets
+- Curate a fixed set of representative (input, expected-behavior) examples — not necessarily exact expected strings, but pass/fail criteria (contains key facts, doesn't contain X, passes a rubric check)
+- Should include: common cases, edge cases, known-tricky past failures (regression set), adversarial/red-team examples
+- Grows over time — every production bug found should become a new golden test case (prevents the same failure recurring silently)
+
+## Eval-Driven Development (EDD) Workflow
+1. Define success criteria upfront (what does "good" look like — faithfulness? format compliance? latency budget?)
+2. Build the golden/eval dataset **before** heavily iterating on prompts/pipeline
+3. Every change (prompt tweak, model swap, chunk size change, new retrieval strategy) gets run against the full eval set
+4. Compare aggregate scores before/after — ship only if it doesn't regress on the golden set, even if it "feels better" anecdotally
+- This mirrors traditional CI/CD but with **eval scores** instead of pass/fail unit tests as the gate
+
+## Prompt Regression Testing
+- Treat prompts as versioned artifacts (like code) — track prompt versions alongside eval scores
+- Automated regression suite: re-run golden dataset against every prompt/model change, flag score drops beyond a threshold
+- Watch specifically for **silent regressions**: a prompt change that improves one category of queries but quietly degrades another — aggregate score alone can hide this, so segment eval results by query type/category
+
+## A/B Testing & Online Evaluation
+- Offline eval (golden set) catches known issues before deploy; **online A/B testing** (shadow traffic, canary rollout) catches issues only visible on real, messy production traffic
+- Key online signals: user feedback (thumbs up/down), regeneration rate (user hit "retry" = implicit negative signal), session abandonment, escalation-to-human rate (for support bots)
+- Feed production failures back into the golden dataset — the eval set should never be static
+
+## Practical Tooling Mentions
+- Frameworks: **RAGAS**, **DeepEval**, **Promptfoo** (prompt regression testing specifically), **LangSmith Evaluators**
+- CI integration pattern: eval suite runs automatically on every PR that touches prompts/retrieval config, blocks merge if scores regress beyond threshold — same mental model as traditional test coverage gates

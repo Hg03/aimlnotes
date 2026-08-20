@@ -2,8 +2,8 @@ import { defineConfig } from "blume";
 
 export default defineConfig({
   // Site
-  title: "My Docs",
-  description: "Documentation for my project.",
+  title: "aimlnotes",
+  description: "Title says everythings.",
   // logo: "/logo.svg",
 
 

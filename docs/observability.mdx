@@ -1,0 +1,59 @@
+---
+title: 14. Observability and Evaluation in AI system
+description: Important aspect to improve AI system.
+---
+
+## Why It Matters
+LLM/RAG systems are non-deterministic and can fail silently (hallucination, retrieval miss, prompt drift) — traditional software monitoring (uptime, latency) isn't enough.
+
+## Observability (Tracing & Monitoring)
+
+**What to trace in a RAG/LLM pipeline:**
+- Input query, retrieved chunks (+ similarity scores), final prompt sent to LLM, model output, latency per stage, token usage/cost
+- Tools: **LangSmith, Langfuse, Arize Phoenix, Weights & Biases (Weave), Helicone**
+
+**Key production metrics:**
+
+| Metric | Purpose |
+|---|---|
+| Latency (p50/p95/p99) | User experience, especially time-to-first-token |
+| Token usage / cost per request | Budget tracking |
+| Error/failure rate | API failures, timeouts, malformed outputs |
+| Retrieval hit rate | % of queries where relevant doc was retrieved |
+| User feedback (thumbs up/down) | Real-world signal, feeds back into eval sets |
+| Drift detection | Are query patterns or input distributions changing over time? |
+
+## Evaluation
+
+### LLM Output Evaluation
+- **Reference-based**: BLEU/ROUGE (n-gram overlap — weak for open-ended generation), exact match (good for QA with short answers)
+- **LLM-as-a-judge**: use a strong LLM to score outputs on rubrics (correctness, coherence, helpfulness) — scalable but has known biases (favors verbose answers, position bias in pairwise comparisons)
+- **Human evaluation**: gold standard but expensive/slow — often used to validate LLM-judge alignment
+- **Task-specific metrics**: for classification-style outputs, use precision/recall/F1; for structured output, JSON schema validity rate
+
+### RAG-specific Evaluation (RAGAS framework — know this cold)
+| Metric | What it measures |
+|---|---|
+| **Faithfulness** | Is the generated answer factually grounded in the retrieved context (no hallucination)? |
+| **Answer Relevance** | Does the answer actually address the question asked? |
+| **Context Precision** | Of the retrieved chunks, how many are actually relevant? |
+| **Context Recall** | Did retrieval capture all the relevant info needed to answer? |
+| **Context Relevance** | How relevant is retrieved context to the query overall? |
+
+**Retrieval-only metrics:**
+- **Precision@k / Recall@k**: relevance of top-k retrieved docs
+- **MRR (Mean Reciprocal Rank)**: average of 1/rank of first relevant result
+- **NDCG (Normalized Discounted Cumulative Gain)**: rewards relevant results appearing higher in ranking
+
+### Hallucination Detection
+- Compare generated claims against retrieved context (entailment check, often via a smaller NLI model or LLM-judge)
+- **Self-consistency check**: sample multiple generations, check agreement
+- Citation-based grounding: force model to cite sources, verify citations map to real retrieved content
+
+## Guardrails (often discussed alongside eval)
+- Input guardrails: PII detection, prompt injection detection, off-topic filtering
+- Output guardrails: toxicity filtering, schema validation, hallucination scoring before returning to user
+- Tools: Guardrails AI, NeMo Guardrails, custom regex/classifier layers
+
+<img width="1080" height="716" alt="image" src="https://github.com/user-attachments/assets/7fc3534e-f235-4894-a3e5-fa7992c48baa" />
+

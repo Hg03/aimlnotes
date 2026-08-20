@@ -1,0 +1,173 @@
+---
+title: 9. MCP
+description: Model Context Protocol
+---
+
+*Emerging standard for connecting LLMs to tools/data sources; increasingly asked in interviews, especially at AI-native companies.*
+
+## What is MCP?
+
+**Core idea:** A standardized, transport-agnostic protocol for connecting Claude (or other LLMs) to external tools, data sources, and services — moving away from ad-hoc tool definitions toward a reusable, composable standard.
+
+**Why it matters:**
+- Decouples tool implementation from LLM application code
+- Enables code reuse across projects/teams
+- Makes tool schemas and behaviors explicit + versioned
+- Simplifies building complex agent workflows
+
+**Unlike basic function calling:**
+- Function calling: you manually define tool schemas, model calls them, you execute — tightly coupled
+- MCP: standardized protocol → tool server exposes capabilities, Claude client discovers and uses them — loosely coupled
+
+## MCP Architecture (Simple)
+
+```
+Claude App (Client)
+    ↕ (MCP Protocol over stdio/HTTP/WebSocket)
+    MCP Server
+        ├─ Tool definitions (schemas, descriptions)
+        ├─ Resource handlers (files, APIs, DBs)
+        └─ Callback execution logic
+```
+
+**Flow:**
+1. Client (Claude app) initiates connection to MCP server
+2. Server advertises available tools + resources + prompts (discovery)
+3. Client (model) decides to use a tool → sends request over protocol
+4. Server executes → returns result → client feeds back to model
+5. Model generates final response
+
+## Key MCP Concepts
+
+| Concept | Purpose |
+|---|---|
+| **Tools** | Functions the model can call — analogous to function calling, but standardized schema + versioning |
+| **Resources** | Stateful data sources (files, API endpoints, DB connections) that tools can access |
+| **Prompts** | Reusable prompt templates with context — versioned, shareable across teams |
+| **Sampling** | Model can delegate to the server (e.g., "sample 10 variations of this query") |
+
+**Interview framing:** "MCP is to tools what Docker is to deployments — standardization + portability + composition."
+
+## MCP Servers (Examples)
+
+**Built-in/Popular MCP servers:**
+- **filesystem**: read/write files, directory listing
+- **postgres**: SQL query tool for PostgreSQL databases
+- **memory**: persistent key-value storage for multi-turn context
+- **web-search**: integration with web search APIs
+- **git**: interact with Git repositories
+- **slack**: send messages, retrieve conversation history
+- **github**: create issues, read repos, trigger workflows
+
+**Why this matters:** instead of building search → retrieval → LLM each time, you just plug in the MCP server that wraps it. Team A's search implementation becomes reusable for Team B.
+
+## Client vs Server Model
+
+**MCP Server** (tool provider):
+- Exposes capabilities (tools, resources)
+- Handles requests from clients
+- Manages authentication/rate limiting
+- Examples: custom API wrapper, database connector, file system service
+
+**MCP Client** (Claude app):
+- Connects to one or more servers
+- Sends tool-call requests
+- Handles execution results
+- Passes results back to LLM
+- Examples: Claude app, agentic framework, standalone tool
+
+**Key insight:** a process can be both (servers can compose other servers) — enables complex multi-service architectures.
+
+## Transport Flexibility
+
+MCP doesn't mandate transport — supports:
+- **stdio**: subprocess communication (simplest, local)
+- **HTTP**: REST over network (common for remote services)
+- **WebSocket**: bidirectional, real-time (good for streaming/multi-turn)
+- **SSE (Server-Sent Events)**: push notifications from server to client
+
+**Interview angle:** "This flexibility means you can start with a local subprocess during dev, scale to HTTP in prod, add WebSocket for real-time without changing tool code."
+
+## MCP vs Function Calling vs Agent Frameworks
+
+| Aspect | Function Calling | MCP | Agent Framework (LangGraph) |
+|---|---|---|---|
+| **Tool definition** | Inline, per app | Standardized, versioned | Framework-specific |
+| **Reusability** | Low (tightly coupled) | High (composable) | Medium (some portability) |
+| **Complexity** | Simple, single request/response | Moderate, protocol overhead | High, full orchestration |
+| **Scalability** | Single model calls tools | Multiple models + servers | Complex multi-agent workflows |
+| **Use case** | Quick prototypes, simple queries | Production systems, team reuse | Complex reasoning, long-horizon tasks |
+
+**Interview soundbite:** "MCP is for when you need tools to be reusable, versioned, and independent of the LLM application code. Function calling is simpler if you don't have those requirements."
+
+## Real-World MCP Pattern
+
+**Scenario:** You have a RAG system + a database query tool + a web search fallback.
+
+**Without MCP:**
+```python
+# In your main app
+def handle_query(q):
+    # Manually implement each tool
+    if should_search(q):
+        results = web_search(q)
+    elif should_query_db(q):
+        results = db_query(q)
+    else:
+        results = rag_retrieval(q)
+    return llm.complete(prompt + results)
+```
+
+**With MCP:**
+```python
+# Each tool is an independent MCP server
+# Your app just connects and lets the model decide
+client = MCPClient([
+    "web_search_server",
+    "database_server", 
+    "rag_server"
+])
+response = client.chat("what's the Q3 revenue?")
+# Model calls the right tool automatically
+```
+
+Benefits:
+- Database team can update schema without touching app code
+- Web search service can be swapped/updated independently
+- Same tools work across multiple Claude apps
+
+## When to Use MCP (and When Not To)
+
+**Use MCP:**
+- Multiple apps need the same tools
+- Tools will evolve/be maintained separately
+- Team has different tool owners (infrastructure, data, ML)
+- Long-term production system where tool reuse matters
+- Building modular agent architectures
+
+**Don't use MCP (use function calling instead):**
+- Quick one-off prototype
+- Single tool, single app
+- Tool logic is simple and unlikely to change
+- Low latency critical (MCP protocol overhead)
+
+## MCP in System Design Interviews
+
+**If asked about building a complex agent system:**
+- Mention MCP for tool modularity
+- "We'd have an MCP server for each critical service (search, database, knowledge graph) so teams can own + update independently"
+- Separate tool evolution from app logic
+- Easier to test (mock MCP servers in tests)
+
+**If asked about scaling tool infrastructure:**
+- MCP servers can be deployed independently (containerized, versioned)
+- Each server has its own auth, rate limiting, monitoring
+- Client app just defines which servers to connect to
+
+## Interview Soundbites on MCP
+
+- *"MCP is a standardized protocol for connecting LLMs to tools — moves tool definitions from inline code to first-class services"*
+- *"Unlike function calling where tool logic is embedded in your app, MCP servers are independent, versioned, and composable"*
+- *"When multiple teams need the same tools (search, database, APIs), MCP makes them reusable and independently updatable"*
+- *"MCP clients can connect to multiple servers simultaneously — the model decides which tool to use, not your orchestration logic"*
+- *"Transport is flexible (stdio, HTTP, WebSocket) — start simple locally, scale to distributed microservices without changing tool code"*

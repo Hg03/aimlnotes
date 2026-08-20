@@ -1,0 +1,36 @@
+---
+title: 7. Prompt Engineering
+description: How you ask, it really mattters and this is where prompt engineering comes handy.
+---
+
+## Core Techniques
+| Technique | Description |
+|---|---|
+| **Zero-shot** | No examples given, just instructions |
+| **Few-shot** | Provide 2-5 examples in the prompt to steer format/style |
+| **Chain-of-Thought (CoT)** | "Let's think step by step" — asking the model to reason before answering, improves accuracy on multi-step/math/logic tasks |
+| **Self-consistency** | Sample multiple CoT reasoning paths, take majority-vote answer — more robust than single CoT |
+| **ReAct** | Interleaves **Reasoning** + **Acting** (tool calls) — "Thought → Action → Observation" loop, foundation of most agent frameworks |
+| **Structured Output / JSON mode** | Constrain output to a schema (via function calling or grammar-constrained decoding) — critical for pipelines that parse LLM output programmatically |
+
+## System vs User vs Assistant Prompts
+- **System prompt**: sets persona, constraints, high-level behavior (persists across turns)
+- **User prompt**: the actual query/instruction
+- **Assistant prompt (prefill)**: can be used to steer output format by starting the assistant's response for it (supported by some APIs)
+
+## Function / Tool Calling
+- Model outputs a structured request (function name + args) instead of free text when it decides a tool is needed
+- Workflow: define tool schemas → model chooses tool + arguments → application executes → result fed back to model → model produces final answer
+- Common failure mode: model hallucinates arguments or calls a tool when it doesn't need to — mitigated by clear tool descriptions + examples
+
+## Prompt Injection (security angle — often asked)
+- **Direct injection**: user directly tries to override system instructions ("ignore previous instructions...")
+- **Indirect injection**: malicious instructions hidden inside retrieved documents/web content that the LLM ingests as "data" but treats as instructions
+- Mitigations: clearly delimit untrusted content, input/output guardrails, least-privilege tool access, never let retrieved content directly trigger actions without validation
+
+## Practical Prompting Tips (best practices)
+- Be explicit about output format (ask for XML/JSON tags, not just "please format nicely")
+- Give positive AND negative examples ("do this, not that")
+- Put critical instructions at the start and end of long prompts (mitigates "lost in the middle")
+- Use delimiters (```, XML tags) to clearly separate instructions from data
+- **Lost in the middle**: LLMs attend less to middle-of-context info — put critical retrieval results at the beginning or end of context

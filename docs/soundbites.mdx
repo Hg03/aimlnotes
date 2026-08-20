@@ -1,0 +1,37 @@
+---
+title: 18. Quick Interview Soundbites
+description: Respond it quick.
+---
+
+- *"Bias-variance tradeoff"* → underfitting vs overfitting, and how regularization/ensembling addresses each
+- *"XGBoost uses second-order gradients (Hessian) for faster, more accurate splits than standard gradient boosting"*
+- *"KV cache trades memory for compute — it's usually the actual bottleneck in LLM serving, not the model weights"*
+- *"PagedAttention applies OS-style virtual memory paging to KV cache to eliminate fragmentation and enable memory sharing"*
+- *"LoRA works because weight updates during fine-tuning have low intrinsic rank — you don't need to update all parameters to adapt a model"*
+- *"QLoRA = 4-bit quantized frozen base + LoRA adapters trained in higher precision — enables fine-tuning huge models on single GPUs"*
+- *"RAG optimization is fundamentally a precision/recall tradeoff at each stage — chunking, retrieval, reranking — and cost/latency tradeoff in production"*
+- *"Faithfulness ≠ Relevance in RAG eval — an answer can be relevant to the question but not grounded in the retrieved context (hallucination), or grounded but not actually relevant"*
+- *"LLM-as-judge is scalable but biased — always validate against a human-labeled sample first"*
+- *"Transformers beat RNNs because self-attention is parallelizable across the sequence — the tradeoff is O(n²) attention cost, which is exactly what KV cache/FlashAttention address at inference"*
+- *"An agent is RAG plus a decision loop — it decides whether, when, and how many times to retrieve or call tools, rather than a fixed single retrieval-then-generate pass"*
+- *"Data parallelism scales throughput, tensor/pipeline parallelism scale model size — production-scale training usually combines all three"*
+- *"When debugging a bad RAG pipeline, first check the boring stuff — embedding model mismatch between index-time and query-time is the most common silent failure"*
+- *"DPO replaces RLHF's reward-model-plus-RL-loop with a single classification-style loss on preference pairs — same alignment goal, far simpler and more stable to train"*
+- *"GRPO (Group Relative Policy Optimization) optimizes on group rankings instead of pairs — more sample-efficient when you have multiple outputs per prompt, used by reasoning-focused models"*
+- *"Bi-encoders scale (independent encoding, pre-indexable) but cross-encoders are more accurate (joint attention) — that's exactly why retrieval uses bi-encoders and reranking uses cross-encoders"*
+- *"Eval-driven development means the golden dataset is the CI gate for prompts and pipeline changes — the same way unit tests gate code changes, just with quality scores instead of pass/fail"*
+- *"RoPE encodes relative position via rotation — better extrapolation than sinusoidal encoding, which is why LLaMA scales to long contexts"*
+- *"GQA is grouped query attention — middle ground between full MHA (huge KV cache) and MQA (accuracy loss), increasingly common in production models"*
+- *"Graph RAG trades chunking simplicity for structured knowledge + multi-hop reasoning — worth it when docs are dense with relationships"*
+- *"Production systems know when they don't know — fallback handling (don't know, escalate, ask clarifying question) is as important as the happy path"*
+- *"WAPE beats MAPE for demand forecasting — MAPE blows up on near-zero actuals from slow-moving SKUs, WAPE stays stable because it aggregates errors and actuals before dividing"*
+- *"Time series CV must be walk-forward, never random k-fold — random splitting leaks future information into training"*
+- *"Global forecasting models (DeepAR, TFT, feature-based XGBoost) beat per-series ARIMA at scale because they share learned patterns across thousands of related series and handle cold-start better"*
+- *"Point forecasts aren't enough for inventory decisions — quantile/probabilistic forecasts (P50/P90) are what let you translate a forecast into a safety-stock and service-level decision"*
+- *"Model selection in time series is a data-fit decision first, evaluation-score decision second: ARIMA for stationary/linear/short-horizon, LSTM for large non-linear/multivariate series with long dependencies, Prophet for seasonal data with missing values or holiday effects — and R² alone is a poor signal for time series because autocorrelated data already gives a naive baseline a head start"*
+- *"In production RAG, the single biggest latency lever is almost always eliminating or caching work, not making retrieval faster — the optimization hierarchy is eliminate, parallelize, reduce, speed up, then improve perceived latency via streaming"*
+- *"Forecasting on AWS is a batch pipeline (Amazon Forecast or SageMaker Batch Transform on an EventBridge-triggered schedule); RAG on AWS is a real-time serving problem (Bedrock Knowledge Bases or OpenSearch behind API Gateway/ALB) — the architectures diverge because one answers on a schedule, the other answers on demand"*
+- *"Bedrock Knowledge Bases is the managed 'buy' option for RAG on AWS — handles chunking, embedding, and retrieval end-to-end; OpenSearch Service is the 'build' option when you need custom hybrid search or reranking logic"*
+- *"In a RAG deployment, generation latency (the LLM call itself) almost always dwarfs retrieval latency — so the highest-leverage optimizations are semantic caching and streaming, not shaving milliseconds off vector search"*
+- *"API Gateway is the right default for simple request/response RAG; once the flow becomes agentic or needs streaming/WebSockets, you move to ALB in front of ECS/Fargate — API Gateway alone doesn't handle long-lived connections well"*
+- *"Managed cloud services buy you reduced ops burden, not capability — a self-hosted vLLM + Qdrant stack behind Nginx can do everything Bedrock + OpenSearch does, the decision comes down to data residency, query volume economics, and team size"*

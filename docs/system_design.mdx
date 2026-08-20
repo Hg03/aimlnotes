@@ -1,0 +1,183 @@
+---
+title: 17. System Design for AI sytems
+description: Forecasting System and RAG System.
+---
+
+*A common prompt: "Design a customer-support chatbot for 1M users using our internal docs." Structure your answer like this:*
+
+### 1. Clarify Requirements
+- Scale (QPS, users), latency SLA, data freshness needs, budget constraints, accuracy/compliance requirements (PII? regulated industry?)
+
+### 2. High-Level Architecture
+```
+User → API Gateway → [Cache check] → Router → 
+   ├─ Simple query → Small/fast LLM (no retrieval)
+   └─ Complex query → Retrieval (Vector DB + BM25 hybrid) 
+                        → Rerank → Prompt Assembly → LLM → 
+                        Guardrails/citation check → Response
+                        ↳ Log to observability pipeline
+```
+
+### 3. Key Design Decisions to Narrate
+- **Ingestion pipeline**: how docs get chunked/embedded/updated (batch nightly vs real-time streaming updates)
+- **Vector DB choice**: justify based on scale + filtering needs (managed like Pinecone vs self-hosted like Qdrant)
+- **Caching layer**: semantic cache for repeat queries; reduces cost/latency at scale
+- **Fallback handling**: what happens if retrieval finds nothing relevant? (say "I don't know" rather than hallucinate)
+- **Cost control**: model routing (cheap model for easy queries), fewer/reranked chunks, cache hit rate targets
+- **Horizontal scaling**: stateless API layer behind load balancer; vector DB sharding for scale
+- **Monitoring**: latency percentiles, retrieval hit rate, user feedback loop feeding back into eval set
+
+### 4. Back-of-envelope Cost/Capacity Estimation (be ready to do simple math)
+- Example: 1M users, 5 queries/day avg = 5M queries/day ≈ 58 QPS avg (much higher at peak)
+- Estimate tokens per query (prompt + retrieved context + output) → estimate $/day using provider pricing
+- Identify the bottleneck: usually LLM inference cost >> vector DB cost >> embedding cost at scale
+
+### 5. Trade-offs to Mention Proactively (shows seniority)
+- Accuracy vs latency vs cost — pick 2, justify the choice for the given use case
+- Build vs buy (self-host OSS model vs API) — depends on scale, data privacy needs, ops maturity
+- Freshness vs cost of re-indexing (real-time updates are expensive; batch is cheaper but stale)
+
+---
+
+## 21. Deploying Forecasting & RAG Solutions on AWS
+
+*A very common "walk me through a production deployment" prompt — interviewers want to see you can name the right service for each stage, justify it against alternatives (including non-AWS/local options), and reason about latency, throughput, and cost, not just say "we used SageMaker for everything."*
+
+### 20.1 Deploying a Demand Forecasting Solution on AWS
+
+#### End-to-end architecture:
+
+```
+S3 (raw sales/transactions data)
+   → Glue (ETL, data catalog, schema discovery)
+   → Feature engineering (Glue/EMR/Athena, or SageMaker Processing jobs)
+   → Model training:
+        ├─ Amazon Forecast (managed AutoML: ARIMA/ETS/Prophet/DeepAR+/CNN-QR)
+        └─ OR SageMaker Training Job (custom DeepAR / XGBoost / TFT)
+   → SageMaker Model Registry (versioning, approval workflow)
+   → Batch inference (SageMaker Batch Transform, or Amazon Forecast's built-in forecast generation)
+   → Forecast output → S3 / Redshift / DynamoDB (for downstream consumption by planning systems)
+   → Orchestration: Step Functions (or Managed Airflow / MWAA) chains ETL → train → evaluate → deploy
+   → Scheduling/retraining trigger: EventBridge (e.g., weekly cron) → kicks off Step Functions pipeline
+   → Monitoring: SageMaker Model Monitor (data/quality drift) + CloudWatch (pipeline health, job failures)
+```
+
+#### Key service choices and why
+
+| Stage | AWS Service | Why |
+|-------|-------------|-----|
+| Raw data storage | **S3** | Cheap, durable, standard landing zone for structured + unstructured data |
+| ETL / feature prep | **Glue** (serverless Spark) or **EMR** (more control) | Glue for simpler managed ETL; EMR when you need fine-grained Spark tuning at large scale |
+| Managed forecasting | **Amazon Forecast** | AutoML across multiple algorithms (DeepAR+, CNN-QR, Prophet, ARIMA, ETS), handles cold-start and hierarchical data, minimal ML ops burden — good default unless you need full model control |
+| Custom modeling | **SageMaker** (Training Jobs, built-in DeepAR algorithm, or bring-your-own container) | Needed when Forecast's algorithm set doesn't fit (custom TFT/N-BEATS, proprietary feature logic, tighter cost control at very large scale) |
+| Batch inference | **SageMaker Batch Transform** | Demand forecasts are typically generated on a schedule (daily/weekly), not real-time — batch is cheaper and simpler than a hosted endpoint |
+| Orchestration | **Step Functions** | Coordinates the multi-step pipeline (ETL → train → evaluate → publish) with retries/error handling; MWAA (managed Airflow) is the alternative if the team already standardizes on Airflow DAGs |
+| Scheduling/retraining | **EventBridge** | Cron-based trigger for periodic retraining, decoupled from the pipeline logic itself |
+| Forecast consumption | **Redshift** (analytics/BI) or **DynamoDB** (low-latency app lookups) | Depends on whether downstream consumer is a BI dashboard/planning tool or an application needing point lookups |
+| Drift monitoring | **SageMaker Model Monitor** | Flags data quality drift (e.g., input distribution shift) that would silently degrade forecast accuracy |
+| Security | **IAM roles (least privilege)**, **VPC endpoints** | Keep data access scoped per pipeline stage; avoid public internet egress for data in transit between services |
+
+**Design notes worth mentioning in an interview:**
+- Forecasting is inherently **batch/scheduled**, not real-time — this simplifies serving considerably vs an LLM RAG system (no need for low-latency hosted endpoints in most cases, so API Gateway/load balancing concerns barely apply here)
+- Retraining cadence is a business tradeoff: too frequent = wasted compute + noisy model churn; too infrequent = stale model missing recent trend/promo shifts — typically weekly or monthly for demand forecasting
+- Amazon Forecast vs custom SageMaker pipeline is a classic **build vs buy** tradeoff: Forecast gets you to production fast with good-enough accuracy; custom SageMaker pipelines are justified when you need probabilistic reconciliation across a hierarchy, proprietary features, or tighter cost control at very large SKU counts
+- **Non-AWS/local alternative worth naming**: if you're not committed to AWS, the same pipeline maps to open-source tooling — Airflow/Prefect/Dagster for orchestration instead of Step Functions, a self-hosted Postgres/Parquet-on-object-storage instead of Redshift, and `statsforecast`/`neuralforecast`/`darts` (open-source Python libraries) running on plain EC2/on-prem GPUs or even a single beefy machine instead of Amazon Forecast. This is a legitimate answer when the interviewer asks "what if you weren't on AWS" — batch forecasting at moderate SKU counts (tens of thousands, not millions) doesn't strictly need managed services; it needs a scheduler and a place to write Parquet files. Managed AWS services buy you less ops burden, not capability you couldn't get otherwise.
+
+### 20.2 Deploying a RAG Solution on AWS
+
+#### End-to-end architecture:
+
+```
+Users → Route 53 (DNS) → CloudFront (CDN, optional, for static assets/UI)
+   → Application Load Balancer (ALB) or API Gateway
+        → API Gateway: request throttling, auth (Cognito/API keys), request validation, usage plans
+        → ALB: needed instead of/alongside API Gateway when routing to long-lived
+          ECS/Fargate services (agentic orchestration, streaming responses, WebSocket connections)
+   → [Cache check: ElastiCache Redis — semantic cache for repeated/similar queries]
+   → Compute layer:
+        ├─ Lambda (simple retrieve-then-generate, short-lived, auto-scales per request)
+        └─ ECS/Fargate (multi-step agentic RAG, longer-running orchestration, avoids Lambda's execution
+                          time limit and cold-start hit on the hot path)
+   → Retrieve top-k from vector store → (optional) rerank
+   → Assemble prompt → Bedrock Runtime (invoke Claude/other model)
+   → Bedrock Guardrails (PII/content filtering) → Response to user (streamed if supported)
+   → Observability: CloudWatch (metrics/logs) + X-Ray (distributed tracing) + Bedrock invocation logging
+```
+
+**Document ingestion side (offline, feeds the vector store above):**
+```
+S3 (raw documents: PDFs, HTML, Confluence exports, etc.)
+   → Ingestion & chunking (Lambda for small scale, or Glue jobs for large batch)
+   → Embedding generation (Bedrock Titan Embeddings, or a SageMaker-hosted custom embedding model)
+   → Vector store:
+        ├─ OpenSearch Service (k-NN plugin) — self-managed control, hybrid (dense+BM25) search
+        ├─ Amazon Kendra — managed enterprise semantic search, less retrieval tuning control
+        ├─ Aurora PostgreSQL + pgvector — if already standardized on relational DBs
+        └─ Bedrock Knowledge Bases — fully managed RAG (handles chunking + embedding + retrieval end-to-end)
+```
+
+#### API Gateway, load balancing, and latency — the parts that actually matter for RAG serving
+
+- **API Gateway's job here** isn't just routing — it's the first line of defense for a public-facing RAG endpoint: request throttling (protects the LLM backend from being overwhelmed, since LLM inference is the expensive/slow part), API-key or Cognito-based auth, request/response validation (reject malformed payloads before they cost you an LLM call), and usage plans (per-customer rate limits/quotas for a multi-tenant product).
+- **API Gateway vs ALB**: API Gateway is the default for simple request/response Lambda-backed RAG (its own scaling is fully managed, integrates natively with Lambda and Cognito). Once the RAG flow becomes agentic — multiple tool calls, streaming tokens back to the client, WebSocket connections for long-lived sessions — you outgrow API Gateway + Lambda's constraints (Lambda's ~15 min execution cap, and REST API Gateway doesn't stream well) and move to an **ALB in front of ECS/Fargate**, which supports long-lived connections, streaming HTTP responses, and WebSockets natively. A common real pattern: API Gateway for the public edge (auth, throttling) with a VPC Link forwarding to an internal ALB/ECS backend — you get API Gateway's edge features without losing ALB's connection flexibility.
+- **Load balancing specifics**: ALB does layer-7 (HTTP-aware) routing — useful for path-based routing (`/chat` vs `/ingest` vs `/admin` to different target groups) and for weighted routing during canary deploys of a new prompt/model version. Health checks on the target group should hit a lightweight endpoint, not one that itself calls the LLM (a slow model call shouldn't look like an unhealthy node).
+- **Where latency actually accumulates in a RAG request**, in the order it happens: (1) auth/throttle check at the gateway — sub-ms if done right; (2) semantic cache lookup — should be a few ms via ElastiCache, this is the highest-leverage latency win since it skips everything downstream; (3) embedding the query — small, fast if using a lightweight embedding model; (4) vector search — depends on index size and type (HNSW is sub-100ms typically at reasonable scale); (5) reranking, if used — adds real latency since it's a cross-encoder forward pass per candidate, so keep the reranked set small (top 20-50, not top 500); (6) **LLM generation itself — almost always the dominant cost**, split into time-to-first-token (driven by prompt length/prefill) and total generation time (driven by output length and decode speed). Streaming the response back to the client (rather than waiting for the full generation) is the single biggest perceived-latency win available and is worth explicitly designing for at the ALB/compute layer.
+- **Horizontal scaling**: Lambda scales per-request automatically (up to account concurrency limits — worth knowing reserved/provisioned concurrency exists to avoid cold starts on latency-sensitive paths). ECS/Fargate scales via an Auto Scaling policy on the service, usually keyed to CPU/memory or a custom CloudWatch metric like in-flight request count — request count is a better scaling signal for LLM-backed services than CPU, since the bottleneck is usually an external API call (Bedrock), not local compute.
+- **Cost/latency lever specific to Bedrock**: **Provisioned Throughput** (reserved capacity on Bedrock) trades a fixed cost for predictable low latency and no throttling under load — worth mentioning as the production answer to "what if on-demand Bedrock rate limits start throttling us during traffic spikes."
+
+#### Key service choices and why
+
+| Stage | AWS Service | Why |
+|-------|-------------|-----|
+| Document storage | **S3** | Standard landing zone, versioned, integrates natively with Bedrock Knowledge Bases as a data source |
+| Chunking/embedding pipeline | **Lambda** (event-driven, small-medium scale) or **Glue** (large batch) | Lambda is simplest for incremental doc updates triggered by S3 events; Glue for large one-time/bulk backfills |
+| Embeddings | **Bedrock Titan Embeddings** (managed) or custom model on **SageMaker endpoint** | Titan is the path of least resistance and stays inside the Bedrock ecosystem; custom SageMaker-hosted embeddings justified for a fine-tuned domain-specific embedding model |
+| Vector store — build your own | **OpenSearch Service** | Most control: hybrid dense+BM25 search, custom index tuning, well-understood at scale |
+| Vector store — managed enterprise search | **Kendra** | Good when you want managed relevance tuning and connectors to enterprise sources (SharePoint, Confluence) out of the box, less low-level control |
+| Vector store — fully managed RAG | **Bedrock Knowledge Bases** | Simplest path: handles chunking, embedding, indexing (backed by OpenSearch Serverless or others), and retrieval in one managed service — good default unless you need very custom retrieval logic |
+| Edge/API layer | **API Gateway** | Auth, throttling, usage plans, request validation — the right default for simple request/response RAG |
+| Edge/API layer — agentic or streaming | **ALB** (+ VPC Link from API Gateway if you want both) | Long-lived connections, streaming, WebSockets — API Gateway alone struggles here |
+| Query orchestration | **Lambda** (simple retrieve-then-generate) or **ECS/Fargate** (multi-step agentic RAG, longer-running orchestration) | Lambda has execution time limits and cold-start considerations — move to Fargate/ECS once the RAG flow becomes agentic (multiple tool calls, longer chains) |
+| Generation | **Bedrock Runtime** (Claude, etc.) | Managed access to foundation models without hosting/serving infra yourself; **Provisioned Throughput** if you need guaranteed low latency at scale |
+| Guardrails | **Bedrock Guardrails** | Built-in PII redaction, content filtering, denied-topics enforcement at the platform level |
+| Caching | **ElastiCache (Redis)** | Semantic cache for repeated/similar queries — cuts cost and latency for FAQ-style traffic; also the single biggest latency lever in the whole pipeline when hit rate is decent |
+| Auth | **Cognito** (user-facing) + **IAM** (service-to-service, least privilege) | Standard AWS-native auth split between end-user identity and internal service permissions |
+| Observability | **CloudWatch + X-Ray** | Latency/error metrics plus distributed tracing across Lambda/API Gateway/Bedrock hops |
+| Networking | **VPC + PrivateLink** | Keep Bedrock traffic off the public internet for regulated/enterprise deployments |
+
+#### Non-AWS / local alternatives worth knowing (interviewers value knowing when NOT to reach for managed cloud services)
+
+| AWS piece | Non-AWS / local / open-source alternative | When it's the better call |
+|---|---|---|
+| Bedrock Knowledge Bases / Bedrock Runtime | Self-hosted **vLLM** or **TGI (Text Generation Inference)** serving an open-weight model, with a self-hosted vector DB (Qdrant, Weaviate, Milvus, or plain FAISS for smaller scale) | Data residency/privacy requirements that rule out any managed cloud inference; very high, steady-state query volume where self-hosting is cheaper per-token than API calls; on-prem/air-gapped environments |
+| OpenSearch Service | Self-hosted **Qdrant** or **Weaviate** (Docker/Kubernetes) | Smaller teams who want hybrid search without operating full OpenSearch clusters — Qdrant in particular is lighter-weight and easier to run locally/on a single VM for moderate scale |
+| API Gateway + ALB | **Nginx** or **Traefik** as reverse proxy/load balancer, **Kong** or **Envoy** for API gateway features (rate limiting, auth) | Non-AWS deployment (on-prem, another cloud, or local Kubernetes) — these give you the same throttling/auth/routing capabilities without AWS lock-in |
+| Step Functions / EventBridge | **Airflow**, **Prefect**, **Dagster**, or plain **cron** | Team already standardized on one of these, or the pipeline is simple enough that a managed orchestrator is overkill |
+| ElastiCache (Redis) | Self-hosted **Redis** or **Memcached** | Identical functionality, just self-managed — makes sense once you're already self-hosting everything else and don't want a second cloud dependency |
+| SageMaker Training/Batch Transform | Plain **EC2 GPU instances** running training scripts directly, or a local/on-prem GPU box for smaller models | Smaller-scale training jobs where SageMaker's orchestration overhead and per-job startup cost isn't worth it; teams comfortable managing their own training loop and checkpointing |
+| CloudWatch + X-Ray | **Prometheus + Grafana** (metrics), **Jaeger** or **OpenTelemetry** (tracing), **Langfuse/Phoenix** (LLM-specific tracing) | Multi-cloud or on-prem setups, or when you specifically want LLM-native observability (token usage, prompt/completion logging) that generic CloudWatch doesn't give you out of the box |
+
+**The honest framing for an interview**: managed AWS services buy you reduced *operational* burden (someone else runs the cluster, patches it, scales it) — they rarely buy you capability you couldn't get from open-source tooling. The right call depends on team size (small team → lean managed to avoid ops overhead), data sensitivity (regulated/on-prem → self-hosted), query volume economics (very high steady-state volume → self-hosting inference can undercut API pricing), and existing infra commitments (already all-in on Kubernetes elsewhere → self-hosted options fit better than adding a new AWS-specific service to the stack).
+
+**Design notes worth mentioning in an interview:**
+- **Bedrock Knowledge Bases vs "build your own with OpenSearch"** is the central build-vs-buy decision for RAG on AWS — Knowledge Bases gets you to production fast and is a strong default; a custom OpenSearch-based pipeline is justified when you need hybrid search tuning, custom rerankers, or non-standard chunking strategies Knowledge Bases doesn't support
+- RAG serving is **real-time/low-latency**, unlike demand forecasting's batch nature — this drives the choice of Lambda/Fargate + API Gateway/ALB instead of batch jobs, and motivates the semantic caching layer
+- Guardrails and PII handling matter more here than in forecasting, since RAG directly surfaces retrieved document content (and potentially generated text) to end users
+- If asked to optimize an existing, too-slow RAG deployment, the actionable order of attack is usually: (1) add/improve semantic caching, (2) check if you're reranking too many candidates, (3) check if streaming is actually enabled end-to-end (gateway → compute → client), (4) check Bedrock on-demand throttling and consider Provisioned Throughput, (5) only then look at retrieval-side optimizations (smaller/better chunks, fewer results) — because generation latency usually dwarfs retrieval latency
+
+### 20.3 Side-by-Side: Forecasting vs RAG Deployment
+
+| Dimension | Forecasting Pipeline | RAG Pipeline |
+|---|---|---|
+| **Serving pattern** | Batch/scheduled (daily/weekly) | Real-time, low-latency |
+| **Core managed service** | Amazon Forecast | Bedrock Knowledge Bases |
+| **Custom-control alternative** | SageMaker Training + Batch Transform | OpenSearch Service + custom Lambda/Fargate orchestration |
+| **Edge/entry point** | None needed (internal batch job) | API Gateway (simple) or ALB (streaming/agentic) |
+| **Orchestration** | Step Functions / MWAA | API Gateway/ALB + Lambda/Fargate |
+| **Trigger** | EventBridge (cron-based retraining) | User request (API call) |
+| **Output store** | S3 / Redshift / DynamoDB | Returned directly to user (optionally logged to S3/CloudWatch) |
+| **Key risk to monitor** | Data/concept drift degrading forecast accuracy | Retrieval quality drift, hallucination, stale index, latency spikes under load |
+| **Primary AWS monitoring tool** | SageMaker Model Monitor | CloudWatch + X-Ray + Bedrock invocation logs |
+| **Non-AWS fallback** | Airflow/Prefect + open-source forecasting libs on EC2/on-prem | Self-hosted vLLM/TGI + Qdrant/Weaviate behind Nginx/Envoy |
+
+**Interview soundbite:** *"Forecasting on AWS is fundamentally a batch pipeline — Amazon Forecast or SageMaker Batch Transform on a scheduled trigger via EventBridge/Step Functions. RAG is fundamentally a real-time serving problem — Bedrock Knowledge Bases or a custom OpenSearch-backed retrieval layer behind API Gateway/ALB. The architectures differ mainly because one answers a question on a schedule and the other answers a question on demand, which is exactly why RAG needs to think hard about API Gateway throttling, load balancing, and streaming, and forecasting doesn't."*

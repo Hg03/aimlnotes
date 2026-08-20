@@ -1,0 +1,34 @@
+---
+title: 4. LLMs Basics
+description: Tokens, Embeddings & Position Encodings.
+---
+
+## Tokenization
+- **What it does**: converts raw text → sequence of integers (token IDs) that the model can process
+- **Why it matters**: LLMs don't understand text; they understand numbers. Tokenization is the critical bridge
+- **Common methods**: 
+  - **BPE (Byte Pair Encoding)**: merges most frequent byte pairs iteratively (used in GPT models)
+  - **WordPiece**: similar to BPE, used in BERT
+  - **SentencePiece**: handles subword segmentation across languages, used in T5/mBART
+- **Key gotcha**: same text tokenizes differently across models → affects input length estimates, model behavior, and cost calculations
+- **Example gotcha**: punctuation handling (does `—` split into multiple tokens?), Unicode normalization, special tokens
+
+**Interview trap:** Tokenizer mismatch between training and inference = silent failure. Always verify you're using the same tokenizer both ways.
+
+## Embeddings
+- **Definition**: dense vector representation of a token that captures semantic meaning
+- **Process**: token ID (e.g., 42) → lookup in embedding matrix (d_model dimensions) → vector (e.g., 768-dim)
+- **Property**: tokens with similar meanings cluster together in vector space (learned during pretraining)
+- **Dimensions**: typical range 512-1536 (older BERT was 768, GPT-3 was 12288, GPT-4 is proprietary)
+- Embedding matrix is **huge** (vocab_size × d_model) — often the largest single component of smaller models
+
+## Position Encodings (detailed)
+**Problem solved:** Transformers process all tokens in parallel, so they have no inherent sense of "order." Position encodings restore this.
+
+**Methods:**
+- **Sinusoidal (original Transformer)**: uses sin/cos at different frequencies — analytic, no learning needed, good extrapolation to longer sequences
+- **Learnable embeddings**: train position embeddings like any other parameter — simpler but poor extrapolation beyond training length
+- **Rotary (RoPE)**: applies rotation matrix based on position — encodes *relative* position (not absolute), excellent extrapolation, used in LLaMA/Mistral
+- **ALiBi (Attention with Linear Biases)**: doesn't add to embeddings, instead subtracts a bias from attention scores based on distance — simplest, some evidence of better extrapolation
+
+**Interview angle:** RoPE's relative-position encoding is why LLaMA models extrapolate well to longer contexts — this is a known win and worth mentioning if asked about long-context models.

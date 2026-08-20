@@ -1,0 +1,31 @@
+---
+title: 13. Graph RAG
+description: Advanced RAG approach helps to arrange the knowledge in a graphical fashion.
+---
+
+*Emerging area; shows up in interviews for advanced candidate pools.*
+
+## Traditional RAG Limitations
+- Text chunking loses relational structure (how entities connect)
+- Dense retrieval finds similar text, not necessarily connected knowledge
+- Hard to answer multi-hop questions (e.g., "What companies does the CEO of X founded earlier in their career?")
+
+## Graph RAG Concept
+- **Idea**: instead of retrieving text chunks, retrieve from a **knowledge graph** (entities + relationships as nodes/edges)
+- **Build process**: extract entities & relationships from docs (via NER + relation extraction, often LLM-aided), build graph
+- **Query process**: convert query to graph traversal, find relevant subgraph, pass to LLM as structured context
+- **Benefit**: captures multi-hop reasoning, explicit entity relationships
+
+## Knowledge Graphs (at a glance)
+- Representation: nodes = entities, edges = relationships (e.g., "Obama" --[president_of]--> "USA")
+- Construction: manual curation (expensive), automated extraction (error-prone but scalable), or hybrid
+- Inference: entity linking, link prediction (what's the missing relationship?), path finding
+- Storage: specialized graph DBs (Neo4j, ArangoDB) or generic triple stores (RDF, SPARQL)
+
+## Graph RAG in Practice (Microsoft's approach)
+- Chunk documents → extract entities/relationships → build hierarchical graph (local + global levels)
+- Query: retrieve relevant subgraph, generate summaries at different levels, pass structured context to LLM
+- Advantage: handles long-tail queries better than dense retrieval alone
+- Tradeoff: much more complex to set up; extraction quality is bottleneck
+
+**Interview angle**: "Graph RAG trades chunking simplicity for structured knowledge + multi-hop reasoning. Worth it when docs are dense with relationships (financial, legal, org structures)."
