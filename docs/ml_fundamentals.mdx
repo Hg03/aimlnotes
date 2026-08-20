@@ -1,0 +1,79 @@
+---
+title: Machine Learning Fundamentals
+description: Basics always holds crucial part in every interview.
+---
+
+### Core Terminology (quick-fire definitions)
+
+| Term | Definition |
+|---|---|
+| **Feature** | Input variable used for prediction |
+| **Label / Target** | The value being predicted |
+| **Overfitting** | Model memorizes training data, fails on unseen data (low bias, high variance) |
+| **Underfitting** | Model too simple, fails to capture patterns (high bias, low variance) |
+| **Bias-Variance Tradeoff** | Bias = error from wrong assumptions; Variance = error from sensitivity to training data noise. Total error = Bias² + Variance + Irreducible error |
+| **Regularization** | Penalizes model complexity to reduce overfitting (L1/Lasso, L2/Ridge, ElasticNet) |
+| **Cross-validation** | Splitting data into k folds to validate model robustness (k-fold CV) |
+| **Precision** | TP / (TP + FP) — "Of predicted positives, how many are correct" |
+| **Recall** | TP / (TP + FN) — "Of actual positives, how many caught" |
+| **F1 Score** | Harmonic mean of precision & recall |
+| **ROC-AUC** | Area under TPR vs FPR curve — measures separability across thresholds |
+| **Gradient Descent** | Iterative optimization: `θ = θ - α∇J(θ)` |
+| **Learning Rate** | Step size in gradient descent |
+| **Loss Function** | MSE (regression), Cross-Entropy (classification) |
+| **Bagging** | Train multiple models on bootstrapped samples, average predictions (reduces variance) — e.g., Random Forest |
+| **Boosting** | Sequentially train models, each correcting previous errors (reduces bias) — e.g., XGBoost, AdaBoost |
+| **Curse of Dimensionality** | As features increase, data becomes sparse, distance metrics lose meaning |
+| **Feature Scaling** | Normalization (0-1) or Standardization (mean 0, std 1) — needed for distance-based/gradient-based models |
+
+---
+
+### Top Algorithms
+
+#### **Linear Regression**
+- Predicts continuous output: `y = w·x + b`
+- Loss: **Mean Squared Error (MSE)**
+- Assumptions: linearity, independence, homoscedasticity (constant variance), normal residuals, no multicollinearity
+- **Interview trap:** Multicollinearity → unstable coefficients. Fix: VIF check, drop correlated features, or use Ridge.
+
+#### **Logistic Regression**
+- Classification via **sigmoid**: `σ(z) = 1/(1+e^-z)`
+- Loss: **Binary Cross-Entropy (Log Loss)**
+- Outputs probability → threshold (default 0.5) → class
+- Decision boundary is **linear**
+- Multi-class: Softmax (multinomial logistic regression) or One-vs-Rest
+
+#### **Support Vector Machine (SVM)**
+- Finds hyperplane that **maximizes margin** between classes
+- **Support vectors** = points closest to the boundary that define it
+- **Kernel trick**: maps data to higher dimensions without explicit computation (RBF, polynomial, linear kernels) → handles non-linear boundaries
+- **C parameter**: controls tradeoff between margin width and misclassification (low C = wider margin, more tolerance; high C = strict, less regularization)
+- **Gamma (RBF)**: controls influence radius of a single point (high gamma = overfitting risk)
+- Good for high-dimensional, small-to-medium datasets; struggles at scale
+
+#### **Decision Tree**
+- Splits data recursively using a feature/threshold that maximizes **information gain** or minimizes **Gini impurity**
+- **Entropy**: `-Σ p(x)log2(p(x))` — measures disorder
+- **Gini Impurity**: `1 - Σ p(x)²`
+- Prone to overfitting → controlled via `max_depth`, `min_samples_split`, pruning
+- Pros: interpretable, handles non-linear data, no scaling needed
+- Cons: high variance, unstable (small data change → different tree)
+
+#### **Random Forest**
+- **Bagging** ensemble of decision trees
+- Each tree trained on bootstrapped sample + random subset of features (**feature bagging**) → decorrelates trees
+- Final prediction: majority vote (classification) / average (regression)
+- Reduces variance vs single tree; robust to overfitting
+- Provides **feature importance** naturally
+
+#### **XGBoost (Extreme Gradient Boosting)**
+- **Sequential boosting**: each tree corrects residual errors of previous ensemble
+- Uses **second-order gradients (Hessian)** for optimization — faster convergence than plain gradient boosting
+- Key features: regularization (L1/L2) built into objective, handles missing values natively, tree pruning via `max_depth` + `gamma` (min loss reduction to split), column/row subsampling
+- **Why it wins competitions:** speed (parallelized split-finding), regularization, handles sparse data
+- Hyperparameters to know: `learning_rate (eta)`, `n_estimators`, `max_depth`, `subsample`, `colsample_bytree`, `lambda/alpha` (regularization)
+- LightGBM/CatBoost are common comparisons — LightGBM uses leaf-wise growth (faster, riskier overfit); CatBoost handles categorical features natively
+
+**Quick comparison table:**
+
+<img width="1024" height="559" alt="image" src="https://gist.github.com/user-attachments/assets/3a58af93-2403-4002-b8f0-ede2f281830f" />

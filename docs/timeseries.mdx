@@ -1,0 +1,170 @@
+---
+title: Time Series Fundamentals
+description: Another topic crucial and basic backbone for your interviews.
+---
+
+## Core Terminology
+
+| Term | Definition |
+|---|---|
+| **Trend** | Long-term upward/downward movement in the series |
+| **Seasonality** | Regular, fixed-period pattern (e.g., weekly, yearly) |
+| **Cyclic pattern** | Fluctuations without fixed period (e.g., business cycles) — differs from seasonality, which has a fixed known period |
+| **Residual / Noise** | What's left after removing trend + seasonality — ideally close to white noise |
+| **Stationarity** | Statistical properties (mean, variance, autocovariance) don't change over time |
+| **Lag** | Value of the series at a previous time step (t-1, t-7, etc.) |
+| **White noise** | Series with no autocorrelation, constant mean/variance — "unpredictable" component |
+| **Random walk** | `y_t = y_{t-1} + ε_t` — next value is previous value plus noise; classic non-stationary series |
+| **Autocorrelation** | Correlation of a series with a lagged version of itself |
+
+### Stationarity — Why It Matters
+- Most classical forecasting models (ARIMA family) **assume stationarity** — a non-stationary series (trending mean, changing variance) breaks the model's assumptions and produces unreliable forecasts
+- **Tests**: 
+  - **ADF (Augmented Dickey-Fuller)**: null hypothesis = series has a unit root (non-stationary); low p-value → reject null → stationary
+  - **KPSS**: opposite null hypothesis (series IS stationary) — often used alongside ADF to cross-check
+- **Fixes for non-stationarity**: differencing (`y_t - y_{t-1}`), log transform (stabilizes variance), seasonal differencing (`y_t - y_{t-m}`)
+
+### Decomposition
+- **Additive model**: `Y = Trend + Seasonality + Residual` — use when seasonal fluctuations are roughly constant in magnitude regardless of trend level
+- **Multiplicative model**: `Y = Trend × Seasonality × Residual` — use when seasonal fluctuations grow/shrink proportionally with the trend level (common in retail/demand data)
+- **Methods**: classical decomposition (simple moving-average based), **STL (Seasonal-Trend decomposition using Loess)** — more robust to outliers and handles seasonality that changes slowly over time, generally preferred over classical decomposition in practice
+
+### ACF & PACF (model identification)
+- **ACF (Autocorrelation Function)**: correlation between the series and its lag, including indirect effects passed through intermediate lags
+- **PACF (Partial Autocorrelation Function)**: correlation between the series and its lag **after removing the effect of intermediate lags** — isolates the direct relationship
+- **Usage for classical model order selection**:
+  - PACF cuts off sharply after lag p → suggests **AR(p)**
+  - ACF cuts off sharply after lag q → suggests **MA(q)**
+  - Both decay gradually → suggests an ARMA (mixed) process
+
+### ARIMA / SARIMA / SARIMAX
+- **ARIMA(p, d, q)**:
+  - **p**: AR order — regression on the series' own past values
+  - **d**: differencing order — number of times differenced to achieve stationarity
+  - **q**: MA order — regression on past forecast errors
+- **SARIMA(p,d,q)(P,D,Q,m)**: adds a seasonal component with its own AR/I/MA orders and seasonal period `m` (e.g., m=12 for monthly data with yearly seasonality)
+- **SARIMAX**: SARIMA + exogenous regressors (e.g., price, promotions, holidays, weather) — very relevant for demand forecasting since demand is rarely driven by history alone
+
+### Exponential Smoothing Family
+| Method | Handles |
+|---|---|
+| **SES (Simple Exponential Smoothing)** | Level only — no trend, no seasonality |
+| **Holt's Linear Trend** | Level + trend |
+| **Holt-Winters** | Level + trend + seasonality (additive or multiplicative) |
+
+- Weighted average of past observations with exponentially decaying weights — recent observations matter more
+- Simple, fast, surprisingly strong baseline, especially at short horizons
+
+### Prophet (Meta)
+- Additive decomposition model: `y(t) = trend(t) + seasonality(t) + holidays(t) + ε`
+- Seasonality modeled via **Fourier terms**, trend via piecewise linear/logistic growth with automatic changepoint detection
+- **Strengths**: handles missing data and outliers gracefully, easy to add holiday effects, minimal tuning needed, good default baseline
+- **Weaknesses**: often underperforms a well-tuned ARIMA or ML model on accuracy; less suited for very high-frequency or highly irregular series
+
+### ML & Deep Learning Approaches
+- **Feature-based ML (XGBoost/LightGBM)**: reframe forecasting as tabular regression using lag features, rolling statistics, calendar features — very strong and popular in industry/competitions (e.g., M5 competition winners)
+- **RNN/LSTM/GRU**: sequence models that learn temporal patterns directly; historically strong but increasingly outperformed by transformer-based or global models
+- **DeepAR (Amazon)**: autoregressive RNN trained **globally across many related time series**, produces **probabilistic** forecasts (full predictive distribution, not just a point estimate) — foundational for Amazon Forecast
+- **Temporal Fusion Transformer (TFT)**: attention-based, handles static covariates, known future inputs (e.g., planned promotions), and past observed inputs jointly; provides interpretable attention weights
+- **N-BEATS / N-HiTS**: pure deep learning architectures (no recurrence/attention needed) that perform strongly on univariate forecasting benchmarks
+- **PatchTST / Informer**: transformer variants optimized for long-horizon forecasting efficiency
+
+### Model Selection Cheat Sheet: ARIMA vs LSTM vs Prophet
+
+*A fast, defensible answer to "which model would you pick and why" — pick based on data characteristics first, then confirm with evaluation scores, not the other way around.*
+
+| | **ARIMA (/SARIMA)** | **LSTM** | **Prophet** |
+|---|---|---|---|
+| **Best data fit** | Stationary (or differenced-to-stationary), linear relationships | Long-term dependencies, large datasets, non-linear/high-variability patterns, multiple/multivariate inputs | Clear seasonality, missing data, irregular time intervals, holiday/event effects |
+| **Forecast horizon** | Short-term — accuracy degrades as the horizon grows | Can model long-range dependencies given enough data | Good general-purpose horizon, especially with strong seasonal structure |
+| **Seasonality** | Limited (needs SARIMA extension) | Learns it implicitly if present in training data | Explicit first-class support (Fourier terms + holiday regressors) |
+| **Data volume needed** | Works with fairly small series | Needs large datasets to train well — underperforms ARIMA/Prophet on short series | Robust even with gaps/missing data, doesn't need huge volume |
+| **Interpretability** | High (explicit AR/I/MA coefficients) | Low (black box) | Medium (decomposed trend/seasonality/holiday components are inspectable) |
+| **Typical use case** | Stable, linear series — e.g. short-term inventory levels, macro series with mild trend | Stock prices, demand with complex non-linear/volatile patterns, multivariate series (price, weather, promos as extra inputs) | Retail/e-commerce sales with weekly/yearly seasonality, web traffic, anything with holiday spikes |
+
+**Decision heuristic:**
+- Data is stationary + linear + short horizon → **ARIMA/SARIMA**
+- Data is highly non-linear, volatile, or has multiple correlated input signals and you have enough history → **LSTM**
+- Data has strong seasonality, missing/irregular observations, or holiday effects and you want a low-maintenance baseline → **Prophet**
+- Overlapping characteristics (e.g., seasonal **and** non-linear/volatile) → consider a **hybrid/stacked** approach, such as LSTM for the non-linear/long-term signal combined with ARIMA for short-term residual correction, or an ensemble of Prophet (seasonality/holidays) + a residual model for the non-linear leftover.
+
+**Practical workflow (don't skip this):** always run EDA first — check stationarity (ADF/KPSS), seasonality strength, missingness, and data volume — before committing to a model family. Different series (even within the same domain, e.g. different currency pairs or different SKUs) can behave very differently, so the right move is usually to shortlist 2-3 candidate models based on the data profile above, then let held-out evaluation (walk-forward, never random k-fold) make the final call rather than picking a favorite model up front.
+
+**Evaluation caveat — R² on time series:** R² tends to look unusually low for time series models even when the model is doing well. This is because time series data is highly autocorrelated, so a naive baseline (e.g., "predict the last observed value") already explains a large share of the variance, leaving little additional variance for the model to capture. Don't be alarmed by a low R² in isolation — compare against a naive/seasonal-naive baseline (this is exactly what **MASE** does, see below) rather than judging R² on its own.
+
+**Interview soundbite:** *"I don't pick a time series model by intuition — ARIMA fits stationary, linear, short-horizon data; LSTM fits large, non-linear, multivariate series with long-range dependencies; Prophet fits seasonal data with missing values or holiday effects. I confirm the choice with walk-forward evaluation against a naive baseline, and I'll stack models — e.g., Prophet for seasonality plus a residual model for non-linear leftover error — when the data shows overlapping characteristics."*
+
+### Time-Series-Specific Cross-Validation
+- **Never use random k-fold** — it leaks future information into training (a huge, common mistake)
+- **Walk-forward / rolling-origin validation**: train on data up to time T, validate on T+1...T+h, then slide the origin forward and repeat
+- **Expanding window**: training set grows each fold (uses all available history)
+- **Sliding window**: training set is a fixed-size window that moves forward (useful when older data is less relevant, e.g., due to concept drift)
+
+### Evaluation Metrics
+| Metric | Notes |
+|---|---|
+| **MAE** | Mean Absolute Error — simple, same units as target |
+| **RMSE** | Penalizes large errors more (squared term) |
+| **MAPE** | Mean Absolute Percentage Error — intuitive but undefined/unstable near zero actuals, asymmetric (penalizes over-forecast less than under-forecast) |
+| **sMAPE** | Symmetric MAPE — attempts to fix MAPE's asymmetry, still has edge cases near zero |
+| **WAPE (Weighted APE)** | Aggregates errors and actuals before dividing — much more stable than MAPE for sparse/low-volume series, very common in demand forecasting |
+| **MASE (Mean Absolute Scaled Error)** | Scale-free — compares model error to a naive (seasonal) forecast's error; MASE < 1 means you're beating the naive baseline |
+| **R²** | Usually low for time series relative to other regression problems — autocorrelated data means a naive last-value baseline already explains much of the variance, so don't treat a low R² alone as a red flag |
+
+**Interview trap:** MAPE breaks down badly on intermittent/low-volume demand data (division by near-zero actuals) — WAPE or MASE is the safer default for demand forecasting eval.
+
+### Multi-Horizon Forecasting Strategies
+- **Direct**: train a separate model per forecast horizon (h=1, h=2, ... h=n) — no error accumulation, but more models to maintain
+- **Recursive**: forecast h=1, feed it back as input to forecast h=2, and so on — simple, but errors compound over the horizon
+- **Multi-output**: single model predicts the entire horizon vector at once (common in DL models like TFT, N-BEATS) — captures cross-horizon dependencies directly
+
+---
+
+## 3. Demand Forecasting
+
+*Applies Section 2's time series toolbox to the specific, very common business problem of predicting product/SKU-level demand for inventory and supply chain decisions.*
+
+### Why Demand Forecasting Is Different From Generic Time Series
+- You're rarely forecasting **one** series — usually thousands to millions of SKU × location combinations
+- Forecasts feed directly into **business decisions with asymmetric costs** (stockout = lost sales/customer trust; overstock = holding cost, waste, markdowns) — accuracy alone isn't the whole story, forecast **bias** matters too
+- Heavy external drivers: promotions, pricing, seasonality, weather, competitor actions, macroeconomic factors
+
+### Key Challenges
+
+| Challenge | Why it's hard | Common fix |
+|---|---|---|
+| **Intermittent / sparse demand** | Many periods with zero demand (e.g., slow-moving SKUs) — MAPE/RMSE misleading, classical ARIMA struggles | **Croston's method**, **TSB (Teunter-Syntetos-Babai)**, or global ML models that pool information across SKUs |
+| **New product / cold start** | No historical data at all | Use analogous/similar product history, hierarchical pooling, attribute-based (content) features instead of pure history |
+| **Promotions & price changes** | Sudden demand spikes not explainable by history alone | Include promo/price as **exogenous regressors** (SARIMAX, feature-based ML, TFT known-future-inputs) |
+| **Hierarchical consistency** | Forecasts at SKU level must roll up consistently to category/region/total level | **Reconciliation**: top-down, bottom-up, middle-out, or **optimal reconciliation (MinT)** which adjusts all levels for statistical coherence |
+| **Scale (thousands of series)** | Fitting individual ARIMA per SKU doesn't scale operationally | **Global models** — one model trained across all series (with SKU/store as a categorical/embedding feature), shares learned patterns, better cold-start behavior |
+
+### Modeling Approaches in Practice
+
+- **Classical, per-series**: ARIMA/SARIMA/Prophet fit independently per SKU — interpretable, fine for a small number of high-value series, doesn't scale well and can't share information across related products
+- **Global feature-based ML**: single LightGBM/XGBoost model trained across all SKU-store combinations with lag features + calendar + price/promo + SKU/store as categorical — currently one of the most common industry-strength approaches (this is essentially what won the M5 forecasting competition)
+- **Global deep learning**: DeepAR, TFT, N-BEATS trained across the full panel of series — best when there's enough data volume to benefit from shared representation learning, and when probabilistic output is needed
+- **Amazon Forecast (managed AWS service)**: AutoML wrapper that tries multiple algorithms (ARIMA, ETS, Prophet, DeepAR+, CNN-QR) and picks/ensembles the best per use case — removes most of the algorithm-selection burden (see Section 21 for deployment details)
+
+### Feature Engineering for Demand Forecasting
+- **Calendar features**: day-of-week, month, is_holiday, is_weekend, days-to-next-holiday
+- **Lag features**: t-1, t-7, t-14, t-28, t-365 (capture weekly/yearly seasonality)
+- **Rolling statistics**: rolling mean/std/min/max over multiple windows (7d, 28d, 90d)
+- **Price/promotion features**: current price, discount %, promo flag, days since last promo
+- **External regressors**: weather, local events, competitor pricing (when available)
+- **Entity features**: SKU category, brand, store cluster, or learned embeddings for high-cardinality IDs
+
+### Probabilistic Forecasting (critical for inventory decisions)
+- A single point forecast isn't enough to set safety stock — you need to know the **distribution** of likely demand
+- Models output **quantile forecasts** (e.g., P10, P50, P90) trained via **pinball/quantile loss**
+- Business use: set reorder points/safety stock based on a target **service level** (e.g., stock to the P90 forecast to achieve ~90% fill rate), rather than just the mean forecast
+
+### Evaluation — Business-Aligned Metrics
+- **WAPE** is the industry default for demand forecasting (robust to zero/low-volume SKUs, aggregates naturally across a portfolio)
+- **Bias metrics** (mean error, not absolute) matter separately from accuracy — a model that's "accurate on average" but systematically under-forecasts will still cause chronic stockouts
+- **Business-facing metrics**: fill rate / service level achieved, inventory holding cost vs. stockout cost tradeoff, forecast value added (FVA) — is the model actually beating a naive/manual forecast?
+
+**Interview soundbite:** *"In demand forecasting, WAPE beats MAPE because MAPE blows up on near-zero actuals, which are common with slow-moving SKUs — WAPE aggregates errors and actuals before dividing, so it stays stable at portfolio scale."*
+
+**Interview soundbite:** *"Point forecasts aren't enough for inventory decisions — you need quantile/probabilistic forecasts to translate a forecast into a safety-stock and service-level decision."*
+
