@@ -4,7 +4,7 @@ export default defineConfig({
   // Site
   title: "aimlnotes",
   description: "Title says everythings.",
-  // logo: "/logo.svg",
+  logo: "/logo.svg",
 
 
   // Content
@@ -14,13 +14,17 @@ export default defineConfig({
 
   // Theme — see the Theming guide
   theme: {
-    accent: "pink",
+    // accent: { light: "blue", dark: "teal" },
     radius: "md",
-    mode: "system",
+    // mode: "system",
     fonts: {
       display: { name: "Noto Sans JP", weights: [400, 700] },
       body: { name: "Noto Sans JP", weights: [400, 500, 700] },
       mono: "ibm-plex-mono",
+    },
+    background: {
+      light: "#dbed65",
+      dark: "#0a0a0a"
     }
   },
 
