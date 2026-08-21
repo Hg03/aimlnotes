@@ -70,6 +70,6 @@ export default defineConfig({
   // Deployment — see the Deployment guide
   deployment: {
     output: "static",
-    site: "https://docs.example.com",
+    site: "https://aimlnotes.vercel.app",
   },
 });
