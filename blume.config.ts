@@ -4,7 +4,7 @@ export default defineConfig({
   // Site
   title: "aimlnotes",
   description: "Title says everythings.",
-  logo: "/logo.svg",
+  logo: "public/logo.svg",
 
 
   // Content
